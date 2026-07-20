@@ -1,56 +1,52 @@
-# Welcome to your Expo app 👋
+# SwipeAndThrow 📸
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A mobile app for cleaning up the photos on your phone through a Tinder-style
+swipe interface. The app serves one photo at a time and you make a fast
+keep-or-discard decision with a swipe gesture — turning photo cleanup from a
+tedious chore in the stock gallery into something quick and low-friction.
+
+**Status:** early development · **Primary platform:** Android
+
+## Tech stack
+
+- [Expo](https://expo.dev) SDK 57 + [Expo Router](https://docs.expo.dev/router/introduction) (file-based routing)
+- React Native 0.86, React 19, TypeScript (strict)
+- [Reanimated](https://docs.expo.dev/versions/v57.0.0/sdk/reanimated/) + [Gesture Handler](https://docs.expo.dev/versions/v57.0.0/sdk/gesture-handler/) for the swipe interactions
 
 ## Get started
 
-1. Install dependencies
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Start the app on Android:
 
    ```bash
-   npx expo start
+   npm run android
    ```
 
-In the output, you'll find options to open the app in a
+   Or run `npm start` and pick a target from the Expo menu.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+App code lives in the **`src/`** directory. Screens are in `src/app/`
+(file-based routing), reusable UI in `src/components/`, hooks in `src/hooks/`.
+Imports use the `@/` alias — e.g. `import { ThemedText } from '@/components/themed-text'`.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Scripts
 
-## Get a fresh project
+| Command | Description |
+|---------|-------------|
+| `npm run android` | Start on Android emulator/device |
+| `npm start` | Start the Expo dev server |
+| `npm run web` | Run in the browser (react-native-web) |
+| `npm run lint` | Lint with `expo lint` |
 
-When you're ready, run:
+## Contributing
 
-```bash
-npm run reset-project
-```
+Project conventions and rules for AI coding assistants live in
+[`AGENTS.md`](./AGENTS.md). Before writing code, always check the exact
+versioned Expo docs at https://docs.expo.dev/versions/v57.0.0/.
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+> ⚠️ This app deletes users' photos. Any discard/delete flow must be explicit,
+> guarded, and reversible where possible. See `AGENTS.md` for the full rule.
