@@ -1,3 +1,13 @@
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import ThemedContainer from "@/components/themedContainer";
+import { Spacing } from "@/constants/theme";
+import {
+  APP_OWNED_MEDIA,
+  KEEP_ALBUM_TITLE,
+  PHOTO_BATCH_SIZE,
+} from "@/constants/values";
+import { useTheme } from "@/hooks/use-theme";
 import { Image } from "expo-image";
 import {
   Album,
@@ -10,24 +20,6 @@ import {
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { MaxContentWidth, Spacing } from "@/constants/theme";
-import { useTheme } from "@/hooks/use-theme";
-
-const PHOTO_BATCH_SIZE = 50;
-
-// Gallery album kept photos are moved into. Doubles as the "already reviewed"
-// marker: assets living here are filtered out of new batches.
-const KEEP_ALBUM_TITLE = "SwipeAndThrow";
-
-// Photos inside another app's `Android/media/<package>` directory (WhatsApp,
-// Telegram, …) are owned by that app. MediaStore refuses to change their
-// ownership, so they can't be moved out — they have to be copied and the
-// originals deleted instead.
-const APP_OWNED_MEDIA = /\/Android\/media\//;
 
 type Decision = { action: "keep" | "throw"; asset: Asset };
 
@@ -41,7 +33,9 @@ function errorMessage(error: unknown) {
 
 // Strips the filename off a file:// uri, leaving the containing folder.
 function folderOf(uri: string) {
-  return decodeURI(uri).replace(/^file:\/\//, "").replace(/\/[^/]*$/, "");
+  return decodeURI(uri)
+    .replace(/^file:\/\//, "")
+    .replace(/\/[^/]*$/, "");
 }
 
 // A random position in [0, length), avoiding `exclude` so tapping "pick"
@@ -58,11 +52,11 @@ function randomIndex(length: number, exclude: number) {
 export default function HomeScreen() {
   const theme = useTheme();
   const [permission, requestPermission] = usePermissions();
-
   const [assets, setAssets] = useState<Asset[]>([]);
   const [index, setIndex] = useState(0);
   const [currentUri, setCurrentUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
   // True while the buffered decisions are being applied to the gallery. The
   // photo is hidden and every button is locked so a slow move/delete can't be
   // fired twice.
@@ -87,12 +81,8 @@ export default function HomeScreen() {
   const hasPhoto = currentUri !== null;
   const showPhoto = hasPhoto && !applying;
 
-  function handleSettings() {
-    // TODO: navigate to the settings screen
-  }
-
   // Makes sure we're allowed to read the gallery, asking the user if needed.
-  async function ensurePermission() {
+  async function checkPermission() {
     let response = permission;
     if (!response?.granted) {
       response = await requestPermission();
@@ -230,7 +220,7 @@ export default function HomeScreen() {
     let active = true;
 
     (async () => {
-      if (!(await ensurePermission()) || !active) return;
+      if (!(await checkPermission()) || !active) return;
       await logAlbums();
       if (active) await pickRandomPicture([]);
     })();
@@ -254,7 +244,7 @@ export default function HomeScreen() {
 
   // Used when the queue has run out entirely and the user asks for more.
   async function handlePickPicture() {
-    if (await ensurePermission()) {
+    if (await checkPermission()) {
       await pickRandomPicture();
     }
   }
@@ -310,7 +300,7 @@ export default function HomeScreen() {
       await keepAlbum.add(group.assets);
     } else {
       // `moveAssets` defaults to true natively, but pass it explicitly so the
-      // move-vs-copy behaviour is visible here.
+      // move-vs-copy behavior is visible here.
       await Album.create(KEEP_ALBUM_TITLE, group.assets, true);
     }
 
@@ -433,7 +423,9 @@ export default function HomeScreen() {
     const notes = [...failures, ...warnings];
     if (notes.length > 0) {
       Alert.alert(
-        failures.length > 0 ? "Some photos weren't handled" : "Done, with notes",
+        failures.length > 0
+          ? "Some photos weren't handled"
+          : "Done, with notes",
         `${notes.join("\n\n")}${failures.length > 0 ? "\n\nThose photos are untouched and still pending." : ""}`,
       );
       return;
@@ -443,67 +435,95 @@ export default function HomeScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.topBar}>
+    <ThemedContainer>
+      <ThemedView style={styles.actions}>
+        {showPhoto && (
+          <ThemedView type="backgroundElement" style={styles.photoCard}>
+            <Image
+              source={{ uri: currentUri }}
+              style={styles.photo}
+              contentFit="contain"
+            />
+            <ThemedText type="small" themeColor="textSecondary">
+              {assets.length} left
+            </ThemedText>
+          </ThemedView>
+        )}
+
+        <Pressable
+          onPress={showPhoto ? handleSkip : handlePickPicture}
+          disabled={loading || applying}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <ThemedView type="backgroundSelected" style={styles.mainButton}>
+            <ThemedText type="subtitle">
+              {loading
+                ? "Loading…"
+                : applying
+                  ? "Working…"
+                  : showPhoto
+                    ? "Skip"
+                    : "Pick a picture"}
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
+
+        <ThemedView style={styles.decisionRow}>
           <Pressable
-            onPress={handleSettings}
-            style={({ pressed }) => pressed && styles.pressed}
+            onPress={handleKeep}
+            disabled={!showPhoto}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              (pressed || !showPhoto) && styles.pressed,
+            ]}
           >
-            <ThemedView type="backgroundElement" style={styles.settingsButton}>
+            <ThemedView type="backgroundElement" style={styles.decisionButton}>
               <SymbolView
-                tintColor={theme.text}
-                name={{
-                  ios: "gearshape",
-                  android: "settings",
-                  web: "settings",
-                }}
-                size={14}
+                tintColor="#34c759"
+                name={{ ios: "checkmark", android: "check", web: "check" }}
+                size={18}
               />
-              <ThemedText type="small">Settings</ThemedText>
+              <ThemedText type="smallBold">Keep</ThemedText>
+              {pendingKeep.length > 0 && (
+                <ThemedText type="small" themeColor="textSecondary">
+                  +{pendingKeep.length}
+                </ThemedText>
+              )}
+            </ThemedView>
+          </Pressable>
+
+          <Pressable
+            onPress={handleThrow}
+            disabled={!showPhoto}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              (pressed || !showPhoto) && styles.pressed,
+            ]}
+          >
+            <ThemedView type="backgroundElement" style={styles.decisionButton}>
+              <SymbolView
+                tintColor="#ff3b30"
+                name={{ ios: "trash", android: "delete", web: "delete" }}
+                size={18}
+              />
+              <ThemedText type="smallBold">Throw</ThemedText>
+              {pendingDelete.length > 0 && (
+                <ThemedText type="small" themeColor="textSecondary">
+                  +{pendingDelete.length}
+                </ThemedText>
+              )}
             </ThemedView>
           </Pressable>
         </ThemedView>
 
-        <ThemedView style={styles.actions}>
-          {showPhoto && (
-            <ThemedView type="backgroundElement" style={styles.photoCard}>
-              <Image
-                source={{ uri: currentUri }}
-                style={styles.photo}
-                contentFit="contain"
-              />
-              <ThemedText type="small" themeColor="textSecondary">
-                {assets.length} left
-              </ThemedText>
-            </ThemedView>
-          )}
-
-          <Pressable
-            onPress={showPhoto ? handleSkip : handlePickPicture}
-            disabled={loading || applying}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <ThemedView type="backgroundSelected" style={styles.mainButton}>
-              <ThemedText type="subtitle">
-                {loading
-                  ? "Loading…"
-                  : applying
-                    ? "Working…"
-                    : showPhoto
-                      ? "Skip"
-                      : "Pick a picture"}
-              </ThemedText>
-            </ThemedView>
-          </Pressable>
-
-          <ThemedView style={styles.decisionRow}>
+        {decisions.length > 0 && (
+          <ThemedView style={styles.pendingRow}>
             <Pressable
-              onPress={handleKeep}
-              disabled={!showPhoto}
+              onPress={handleUndo}
+              disabled={applying}
               style={({ pressed }) => [
                 styles.decisionPressable,
-                (pressed || !showPhoto) && styles.pressed,
+                (pressed || applying) && styles.pressed,
               ]}
             >
               <ThemedView
@@ -511,110 +531,43 @@ export default function HomeScreen() {
                 style={styles.decisionButton}
               >
                 <SymbolView
-                  tintColor="#34c759"
-                  name={{ ios: "checkmark", android: "check", web: "check" }}
+                  tintColor={theme.text}
+                  name={{
+                    ios: "arrow.uturn.backward",
+                    android: "undo",
+                    web: "undo",
+                  }}
                   size={18}
                 />
-                <ThemedText type="smallBold">Keep</ThemedText>
-                {pendingKeep.length > 0 && (
-                  <ThemedText type="small" themeColor="textSecondary">
-                    +{pendingKeep.length}
-                  </ThemedText>
-                )}
+                <ThemedText type="smallBold">Undo</ThemedText>
               </ThemedView>
             </Pressable>
 
             <Pressable
-              onPress={handleThrow}
-              disabled={!showPhoto}
+              onPress={handleApplyDecisions}
+              disabled={applying}
               style={({ pressed }) => [
                 styles.decisionPressable,
-                (pressed || !showPhoto) && styles.pressed,
+                (pressed || applying) && styles.pressed,
               ]}
             >
               <ThemedView
-                type="backgroundElement"
+                type="backgroundSelected"
                 style={styles.decisionButton}
               >
-                <SymbolView
-                  tintColor="#ff3b30"
-                  name={{ ios: "trash", android: "delete", web: "delete" }}
-                  size={18}
-                />
-                <ThemedText type="smallBold">Throw</ThemedText>
-                {pendingDelete.length > 0 && (
-                  <ThemedText type="small" themeColor="textSecondary">
-                    +{pendingDelete.length}
-                  </ThemedText>
-                )}
+                <ThemedText type="smallBold">
+                  {applying ? "Applying…" : `Apply ${decisions.length}`}
+                </ThemedText>
               </ThemedView>
             </Pressable>
           </ThemedView>
-
-          {decisions.length > 0 && (
-            <ThemedView style={styles.pendingRow}>
-              <Pressable
-                onPress={handleUndo}
-                disabled={applying}
-                style={({ pressed }) => [
-                  styles.decisionPressable,
-                  (pressed || applying) && styles.pressed,
-                ]}
-              >
-                <ThemedView
-                  type="backgroundElement"
-                  style={styles.decisionButton}
-                >
-                  <SymbolView
-                    tintColor={theme.text}
-                    name={{
-                      ios: "arrow.uturn.backward",
-                      android: "undo",
-                      web: "undo",
-                    }}
-                    size={18}
-                  />
-                  <ThemedText type="smallBold">Undo</ThemedText>
-                </ThemedView>
-              </Pressable>
-
-              <Pressable
-                onPress={handleApplyDecisions}
-                disabled={applying}
-                style={({ pressed }) => [
-                  styles.decisionPressable,
-                  (pressed || applying) && styles.pressed,
-                ]}
-              >
-                <ThemedView
-                  type="backgroundSelected"
-                  style={styles.decisionButton}
-                >
-                  <ThemedText type="smallBold">
-                    {applying ? "Applying…" : `Apply ${decisions.length}`}
-                  </ThemedText>
-                </ThemedView>
-              </Pressable>
-            </ThemedView>
-          )}
-        </ThemedView>
-      </SafeAreaView>
-    </ThemedView>
+        )}
+      </ThemedView>
+    </ThemedContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-  },
-  safeArea: {
-    flex: 1,
-    width: "100%",
-    maxWidth: MaxContentWidth,
-    paddingHorizontal: Spacing.four,
-  },
   topBar: {
     flexDirection: "row",
     justifyContent: "flex-end",
