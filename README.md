@@ -5,6 +5,8 @@ swipe interface. The app serves one photo at a time and you make a fast
 keep-or-discard decision with a swipe gesture — turning photo cleanup from a
 tedious chore in the stock gallery into something quick and low-friction.
 
+**Scope:** photos and images only — no music/audio, no video.
+
 **Status:** early development · **Primary platform:** Android
 
 ## Tech stack
@@ -50,3 +52,6 @@ versioned Expo docs at https://docs.expo.dev/versions/v57.0.0/.
 
 > ⚠️ This app deletes users' photos. Any discard/delete flow must be explicit,
 > guarded, and reversible where possible. See `AGENTS.md` for the full rule.
+>
+> 🖼️ Images only. Don't add audio/music or video handling — every media-library
+> query filters to `MediaType.IMAGE`.

@@ -10,20 +10,31 @@ Primary target platform: **Android** (tested on emulator/device).
 
 ## Hard rules
 
+- **Photos only.** This app deals with images and nothing else. Never add
+  audio/music, video, or any other media handling — no `MediaType.AUDIO` or
+  `MediaType.VIDEO` queries, no audio libraries, no sound effects. Every
+  media-library query must filter to `MediaType.IMAGE`, and anything that
+  lists albums/collections must exclude those that hold no images.
 - **Expo has changed.** Read the exact versioned docs at
   https://docs.expo.dev/versions/v57.0.0/ before writing any code.
-- **Deleting photos is destructive and irreversible.** Any flow that discards
-  or deletes a photo must be explicit, guarded, and reversible where possible
-  (e.g. a confirm step, an "undo last swipe", or a trash/pending-delete buffer
-  before the OS-level delete). Never wire a swipe gesture straight to a
-  permanent delete without a safety net.
+- **Deleting photos is destructive and irreversible.** Every discard must be
+  guarded by a confirmation the user actually sees. Today that guard is the
+  Android system delete dialog raised by `Asset.delete()` — a declined dialog
+  rejects and leaves the photo in place. Do not add a delete path that
+  bypasses it, and don't batch-delete without an explicit confirm step.
+- **A decision always moves the photo out of its original folder.** "Keep"
+  moves the asset into the `SwipeAndThrow` album (created on first use);
+  "Throw" deletes it. The photo on screen is hidden for the whole operation
+  and the decision buttons are locked, so an asset being moved or deleted is
+  never left visible or acted on twice.
 
 ## Tech stack
 
 - Expo SDK 57 + Expo Router (file-based routing)
 - React Native 0.86, React 19, TypeScript (`strict`)
 - Gestures/animation: `react-native-gesture-handler`, `react-native-reanimated`
-- `expo-media-library` — reads and deletes photos from the device gallery.
+- `expo-media-library` — reads and deletes photos from the device gallery
+  (images only — see the photos-only hard rule).
   Config plugin is registered in `app.json` (permission strings + Android
   manifest entries). Request permissions at runtime before accessing photos.
 
