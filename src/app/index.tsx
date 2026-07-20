@@ -1,13 +1,13 @@
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import ThemedContainer from "@/components/themedContainer";
+import ThemedContainer from "@/components/common/themedContainer";
+import { ThemedText } from "@/components/common/themedText";
+import { ThemedView } from "@/components/common/themedView";
 import { Spacing } from "@/constants/theme";
 import {
   APP_OWNED_MEDIA,
   KEEP_ALBUM_TITLE,
   PHOTO_BATCH_SIZE,
 } from "@/constants/values";
-import { useTheme } from "@/hooks/use-theme";
+import { useTheme } from "@/hooks/useTheme";
 import { Image } from "expo-image";
 import {
   Album,

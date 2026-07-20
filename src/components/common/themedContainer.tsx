@@ -1,4 +1,7 @@
-import { ThemedView, type ThemedViewProps } from "@/components/themed-view";
+import {
+  ThemedView,
+  type ThemedViewProps,
+} from "@/components/common/themedView";
 import { MaxContentWidth, Spacing } from "@/constants/theme";
 import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";

@@ -1,5 +1,5 @@
-import { ThemedText } from "@/components/themed-text";
-import ThemedContainer from "@/components/themedContainer";
+import ThemedContainer from "@/components/common/themedContainer";
+import { ThemedText } from "@/components/common/themedText";
 import { StyleSheet } from "react-native";
 
 export default function Settings() {
