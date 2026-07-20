@@ -8,7 +8,7 @@ import {
   usePermissions,
 } from "expo-media-library";
 import { SymbolView } from "expo-symbols";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -73,6 +73,9 @@ export default function HomeScreen() {
   // decisions in one ordered list is what lets a single Undo reverse the last
   // one whichever kind it was.
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  // Photos skipped this session. They keep their place in the gallery — the
+  // ids only stop them coming back around before the app is restarted.
+  const [skippedIds, setSkippedIds] = useState<string[]>([]);
 
   const pendingKeep = decisions
     .filter((decision) => decision.action === "keep")
@@ -132,8 +135,12 @@ export default function HomeScreen() {
     ]);
 
     const decidedIds = new Set(decisions.map((decision) => decision.asset.id));
+    const skipped = new Set(skippedIds);
     return batch.filter(
-      (asset) => !reviewedIds.has(asset.id) && !decidedIds.has(asset.id),
+      (asset) =>
+        !reviewedIds.has(asset.id) &&
+        !decidedIds.has(asset.id) &&
+        !skipped.has(asset.id),
     );
   }
 
@@ -217,9 +224,37 @@ export default function HomeScreen() {
     }
   }
 
+  // Loads the first batch as soon as the app opens, so there's a photo waiting
+  // instead of an empty screen. Runs once — the permission prompt is part of it.
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      if (!(await ensurePermission()) || !active) return;
+      await logAlbums();
+      if (active) await pickRandomPicture([]);
+    })();
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Moves past the current photo without deciding anything. The photo is left
+  // exactly where it is; it just won't come up again this session.
+  function handleSkip() {
+    const asset = assets[index];
+    if (!asset || applying) return;
+
+    setSkippedIds((prev) => [...prev, asset.id]);
+    setCurrentUri(null);
+    pickRandomPicture(assets.filter((_, i) => i !== index));
+  }
+
+  // Used when the queue has run out entirely and the user asks for more.
   async function handlePickPicture() {
     if (await ensurePermission()) {
-      await logAlbums();
       await pickRandomPicture();
     }
   }
@@ -393,6 +428,8 @@ export default function HomeScreen() {
     );
     setApplying(false);
 
+    // Nothing is shown on success — the system dialogs already confirmed it.
+    // Only problems are worth interrupting for.
     const notes = [...failures, ...warnings];
     if (notes.length > 0) {
       Alert.alert(
@@ -402,7 +439,7 @@ export default function HomeScreen() {
       return;
     }
 
-    Alert.alert("Done", `Kept ${kept}, deleted ${pendingDelete.length}.`);
+    console.log(`Applied: kept ${kept}, deleted ${pendingDelete.length}.`);
   }
 
   return (
@@ -443,7 +480,7 @@ export default function HomeScreen() {
           )}
 
           <Pressable
-            onPress={handlePickPicture}
+            onPress={showPhoto ? handleSkip : handlePickPicture}
             disabled={loading || applying}
             style={({ pressed }) => pressed && styles.pressed}
           >
@@ -453,8 +490,8 @@ export default function HomeScreen() {
                   ? "Loading…"
                   : applying
                     ? "Working…"
-                    : hasPhoto
-                      ? "Pick another picture"
+                    : showPhoto
+                      ? "Skip"
                       : "Pick a picture"}
               </ThemedText>
             </ThemedView>
