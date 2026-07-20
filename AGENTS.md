@@ -17,19 +17,31 @@ Primary target platform: **Android** (tested on emulator/device).
   lists albums/collections must exclude those that hold no images.
 - **Expo has changed.** Read the exact versioned docs at
   https://docs.expo.dev/versions/v57.0.0/ before writing any code.
-- **Deleting photos is destructive and irreversible.** "Throw" never deletes
-  on the spot — it buffers the asset in the in-memory trash (`pendingDelete`),
-  which is undoable. Deletion happens only when the user empties the trash,
-  which passes the whole buffer to `Asset.delete(assets)` so Android raises a
-  single system confirmation for the batch; declining it rejects and leaves
-  every photo in place. Never add a delete path that skips the buffer or that
-  confirmation.
-- **A decision moves the photo out of its original folder.** "Keep" moves the
-  asset into the `SwipeAndThrow` album (created on first use) immediately;
-  "Throw" removes it from the review queue and it leaves the folder for real
-  when the trash is emptied. The photo on screen is hidden for the whole
-  operation and the buttons are locked, so an asset being acted on is never
-  left visible or handled twice.
+- **No decision touches the gallery until the user applies the batch.** Both
+  "Keep" and "Throw" only append to the in-memory `decisions` buffer, so every
+  decision stays undoable and every photo sits in its original folder until
+  then. Applying runs two batched calls: `album.add(assets)` moves the kept
+  photos into the `SwipeAndThrow` album (created on first use), then
+  `Asset.delete(assets)` deletes the thrown ones. Each is a single native call
+  behind one Android system dialog, and the two phases run independently — a
+  refused move must never cost the user their deletes, or the other way round.
+  A phase that fails leaves its own photos buffered. Never add a path that
+  deletes without going through that buffer and confirmation.
+- **The buffer is memory-only.** Closing the app loses pending decisions;
+  that's accepted, since nothing has been moved or deleted yet. Don't "fix"
+  it by applying decisions eagerly.
+- **Applying moves photos out of their original folders.** Kept photos land in
+  `Pictures/SwipeAndThrow/` — the album root is hardcoded per media type in the
+  library (`MimeType.albumRootDirectory()`), so it can't be pointed at `DCIM/`
+  without patching. `album.add()` does respect an existing album's real path,
+  unlike `Album.create()`.
+- **Photos in another app's `Android/media/<package>` folder can't be moved.**
+  MediaStore rejects the ownership change (`IllegalArgumentException: Changing
+  ownership ... not allowed`), which affects WhatsApp/Telegram media. Keeping
+  those copies them into the album (`Album.create(..., moveAssets: false)`)
+  and then deletes the originals. Deleting them works normally. Keeps are
+  grouped by source folder and applied one call per group, so an unmovable
+  folder can't fail the rest of the batch.
 
 ## Tech stack
 

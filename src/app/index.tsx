@@ -23,6 +23,27 @@ const PHOTO_BATCH_SIZE = 50;
 // marker: assets living here are filtered out of new batches.
 const KEEP_ALBUM_TITLE = "SwipeAndThrow";
 
+// Photos inside another app's `Android/media/<package>` directory (WhatsApp,
+// Telegram, …) are owned by that app. MediaStore refuses to change their
+// ownership, so they can't be moved out — they have to be copied and the
+// originals deleted instead.
+const APP_OWNED_MEDIA = /\/Android\/media\//;
+
+type Decision = { action: "keep" | "throw"; asset: Asset };
+
+// A set of photos that share a source folder, applied as one native call so a
+// folder that rejects the operation can't take the others down with it.
+type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Strips the filename off a file:// uri, leaving the containing folder.
+function folderOf(uri: string) {
+  return decodeURI(uri).replace(/^file:\/\//, "").replace(/\/[^/]*$/, "");
+}
+
 // A random position in [0, length), avoiding `exclude` so tapping "pick"
 // always lands on a different photo when there's more than one to choose from.
 function randomIndex(length: number, exclude: number) {
@@ -42,17 +63,26 @@ export default function HomeScreen() {
   const [index, setIndex] = useState(0);
   const [currentUri, setCurrentUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // True while a keep/throw is being applied to the gallery. The photo is
-  // hidden and both decision buttons are locked so a slow move/delete can't be
-  // double-fired onto the same asset.
-  const [deciding, setDeciding] = useState(false);
-  // Photos the user threw. Nothing has been deleted yet — they sit here until
-  // the user empties the trash, which deletes the whole buffer behind a single
-  // system confirmation. Until then every throw is undoable.
-  const [pendingDelete, setPendingDelete] = useState<Asset[]>([]);
+  // True while the buffered decisions are being applied to the gallery. The
+  // photo is hidden and every button is locked so a slow move/delete can't be
+  // fired twice.
+  const [applying, setApplying] = useState(false);
+  // Every decision the user has made, in order. Nothing has touched the
+  // gallery yet — photos stay in their original folders until the user applies
+  // the batch, so any decision can be undone up to that point. Keeping the
+  // decisions in one ordered list is what lets a single Undo reverse the last
+  // one whichever kind it was.
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+
+  const pendingKeep = decisions
+    .filter((decision) => decision.action === "keep")
+    .map((decision) => decision.asset);
+  const pendingDelete = decisions
+    .filter((decision) => decision.action === "throw")
+    .map((decision) => decision.asset);
 
   const hasPhoto = currentUri !== null;
-  const showPhoto = hasPhoto && !deciding;
+  const showPhoto = hasPhoto && !applying;
 
   function handleSettings() {
     // TODO: navigate to the settings screen
@@ -89,7 +119,8 @@ export default function HomeScreen() {
   }
 
   // Fetches a fresh batch of unreviewed photos from the gallery. Photos already
-  // kept, or sitting in the trash buffer awaiting deletion, are excluded.
+  // in the keep album, or awaiting a decision in the pending buffer, are
+  // excluded so nothing comes up for review twice.
   async function loadPhotoBatch() {
     const [batch, reviewedIds] = await Promise.all([
       new Query()
@@ -100,9 +131,9 @@ export default function HomeScreen() {
       loadReviewedIds(),
     ]);
 
-    const trashedIds = new Set(pendingDelete.map((asset) => asset.id));
+    const decidedIds = new Set(decisions.map((decision) => decision.asset.id));
     return batch.filter(
-      (asset) => !reviewedIds.has(asset.id) && !trashedIds.has(asset.id),
+      (asset) => !reviewedIds.has(asset.id) && !decidedIds.has(asset.id),
     );
   }
 
@@ -162,16 +193,21 @@ export default function HomeScreen() {
     try {
       const albums = await Album.getAll();
       const entries = await Promise.all(
-        albums.map(async (album) => ({
-          id: album.id,
-          title: await album.getTitle(),
-          photoCount: (
-            await new Query()
-              .album(album)
-              .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-              .exeForMetadata()
-          ).length,
-        })),
+        albums.map(async (album) => {
+          const photos = await new Query()
+            .album(album)
+            .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+            .exe();
+
+          return {
+            title: await album.getTitle(),
+            photoCount: photos.length,
+            // Where the album actually sits on disk, read off its first photo
+            // (`getUri` returns a real file:// path). This is what decides
+            // whether an album shows up next to the others in the gallery.
+            folder: photos[0] ? folderOf(await photos[0].getUri()) : "—",
+          };
+        }),
       );
 
       const photoAlbums = entries.filter((entry) => entry.photoCount > 0);
@@ -188,46 +224,94 @@ export default function HomeScreen() {
     }
   }
 
-  // Moves the asset into the keep album, creating the album on first use. On
-  // Android an asset belongs to exactly one album, so this takes the photo out
-  // of its original folder rather than copying it.
-  async function moveToKeepAlbum(asset: Asset) {
-    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
-    if (keepAlbum) {
-      await keepAlbum.add(asset);
-      return;
+  // Splits the kept photos by source folder. Each group becomes its own native
+  // call, so a folder that refuses the operation only fails its own photos.
+  async function groupKeepsByFolder(assetsToKeep: Asset[]) {
+    const groups = new Map<string, KeepGroup>();
+
+    for (const asset of assetsToKeep) {
+      const folder = folderOf(await asset.getUri());
+      const group = groups.get(folder);
+      if (group) {
+        group.assets.push(asset);
+      } else {
+        groups.set(folder, {
+          folder,
+          assets: [asset],
+          appOwned: APP_OWNED_MEDIA.test(folder),
+        });
+      }
     }
-    await Album.create(KEEP_ALBUM_TITLE, [asset]);
+
+    return [...groups.values()];
   }
 
-  // Applies a decision to the photo on screen, then drops it from the queue and
-  // moves on to another random photo. Keeping moves the photo out of its
-  // original folder right away; throwing only buffers it for a later batch
-  // delete, so nothing is destroyed here.
-  async function handleDecision(action: "keep" | "throw") {
-    const asset = assets[index];
-    if (!asset || deciding) return;
+  // Applies one folder's worth of keeps. Returns a warning when the photos
+  // landed in the album but something non-fatal was left behind.
+  async function applyKeepGroup(group: KeepGroup) {
+    if (group.appOwned) {
+      // Ownership can't move out of another app's media directory, so copy
+      // into the album (`moveAssets: false`) and delete the originals. The copy
+      // needs no permission dialog — the new file belongs to us — but the
+      // delete does.
+      await Album.create(KEEP_ALBUM_TITLE, group.assets, false);
 
-    // Hides the photo for the whole operation, so an asset that is being moved
-    // is never left on screen.
-    setDeciding(true);
-    try {
-      if (action === "keep") {
-        await moveToKeepAlbum(asset);
-      } else {
-        setPendingDelete((prev) => [...prev, asset]);
+      try {
+        await Asset.delete(group.assets);
+      } catch {
+        // The photos are safely in the album; only the originals remain.
+        // Retrying would copy them a second time, so treat this as done and
+        // tell the user what's left over.
+        return `${group.assets.length} photo(s) from ${group.folder} were copied to the album, but their originals couldn't be removed — you may see duplicates.`;
       }
 
-      setCurrentUri(null);
-      await pickRandomPicture(assets.filter((_, i) => i !== index));
-    } catch {
-      Alert.alert(
-        "Couldn't keep that photo",
-        "The photo was left where it is. Please try again.",
-      );
-    } finally {
-      setDeciding(false);
+      return null;
     }
+
+    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
+    if (keepAlbum) {
+      // The native binding takes `List<Asset>`, and nothing in the JS layer
+      // wraps a lone asset despite what the types claim — always pass an array.
+      await keepAlbum.add(group.assets);
+    } else {
+      // `moveAssets` defaults to true natively, but pass it explicitly so the
+      // move-vs-copy behaviour is visible here.
+      await Album.create(KEEP_ALBUM_TITLE, group.assets, true);
+    }
+
+    return null;
+  }
+
+  // A move can succeed while the album fails to register, which would silently
+  // strand photos outside their original folders. Read it back from MediaStore
+  // and fail loudly if it isn't there.
+  async function verifyKeepAlbum() {
+    const saved = await Album.get(KEEP_ALBUM_TITLE);
+    if (!saved) {
+      throw new Error(
+        `Photos were moved, but no "${KEEP_ALBUM_TITLE}" album is registered in MediaStore.`,
+      );
+    }
+
+    const contents = await new Query()
+      .album(saved)
+      .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+      .exeForMetadata();
+    console.log(
+      `Keep album "${KEEP_ALBUM_TITLE}" (id ${saved.id}) now holds ${contents.length} photo(s).`,
+    );
+  }
+
+  // Records a decision and moves on. Nothing touches the gallery here — both
+  // kinds of decision only join the pending buffer, so every one of them stays
+  // undoable until the batch is applied.
+  function handleDecision(action: "keep" | "throw") {
+    const asset = assets[index];
+    if (!asset || applying) return;
+
+    setDecisions((prev) => [...prev, { action, asset }]);
+    setCurrentUri(null);
+    pickRandomPicture(assets.filter((_, i) => i !== index));
   }
 
   function handleKeep() {
@@ -238,33 +322,87 @@ export default function HomeScreen() {
     handleDecision("throw");
   }
 
-  // Puts the most recently thrown photo back into the review queue.
-  function handleUndoThrow() {
-    if (pendingDelete.length === 0 || deciding) return;
+  // Reverses the most recent decision, whichever kind it was, and puts that
+  // photo back into the review queue.
+  function handleUndo() {
+    const last = decisions[decisions.length - 1];
+    if (!last || applying) return;
 
-    const restored = pendingDelete[pendingDelete.length - 1];
-    setPendingDelete((prev) => prev.slice(0, -1));
-    pickRandomPicture([...assets, restored]);
+    setDecisions((prev) => prev.slice(0, -1));
+    pickRandomPicture([...assets, last.asset]);
   }
 
-  // Deletes the whole trash buffer in one go. `Asset.delete` takes the entire
-  // list, so Android raises a single confirmation for every photo at once —
-  // declining it rejects and leaves the buffer untouched.
-  async function handleEmptyTrash() {
-    if (pendingDelete.length === 0 || deciding) return;
+  // Applies the whole buffer: moves the kept photos first, then deletes the
+  // thrown ones. Each phase is a single batched native call behind one system
+  // dialog, and the two run independently — a refused move must not cost the
+  // user their deletes, or the other way round. A phase that fails leaves its
+  // own photos buffered so they can be retried or undone.
+  async function handleApplyDecisions() {
+    if (decisions.length === 0 || applying) return;
 
-    setDeciding(true);
-    try {
-      await Asset.delete(pendingDelete);
-      setPendingDelete([]);
-    } catch {
-      Alert.alert(
-        "Nothing was deleted",
-        "Your photos are still in the trash. You can try again or undo them.",
-      );
-    } finally {
-      setDeciding(false);
+    setApplying(true);
+    const failures: string[] = [];
+    const warnings: string[] = [];
+    // Ids that made it through, so a failing group leaves only its own photos
+    // buffered for a retry.
+    const applied = new Set<string>();
+    let kept = 0;
+
+    if (pendingKeep.length > 0) {
+      try {
+        const groups = await groupKeepsByFolder(pendingKeep);
+
+        for (const group of groups) {
+          try {
+            const warning = await applyKeepGroup(group);
+            if (warning) warnings.push(warning);
+
+            group.assets.forEach((asset) => applied.add(asset.id));
+            kept += group.assets.length;
+          } catch (error) {
+            console.log(`keep failed for ${group.folder}`, error);
+            failures.push(
+              `Keeping ${group.assets.length} from ${group.folder}: ${errorMessage(error)}`,
+            );
+          }
+        }
+
+        if (kept > 0) await verifyKeepAlbum();
+      } catch (error) {
+        console.log("keep phase failed", error);
+        failures.push(`Keeping photos: ${errorMessage(error)}`);
+      }
     }
+
+    if (pendingDelete.length > 0) {
+      try {
+        // One `createDeleteRequest` for the whole list, so Android asks once.
+        await Asset.delete(pendingDelete);
+        pendingDelete.forEach((asset) => applied.add(asset.id));
+      } catch (error) {
+        console.log("throw batch failed", error);
+        failures.push(
+          `Throwing ${pendingDelete.length}: ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    // Clear only what actually went through.
+    setDecisions((prev) =>
+      prev.filter((decision) => !applied.has(decision.asset.id)),
+    );
+    setApplying(false);
+
+    const notes = [...failures, ...warnings];
+    if (notes.length > 0) {
+      Alert.alert(
+        failures.length > 0 ? "Some photos weren't handled" : "Done, with notes",
+        `${notes.join("\n\n")}${failures.length > 0 ? "\n\nThose photos are untouched and still pending." : ""}`,
+      );
+      return;
+    }
+
+    Alert.alert("Done", `Kept ${kept}, deleted ${pendingDelete.length}.`);
   }
 
   return (
@@ -306,14 +444,14 @@ export default function HomeScreen() {
 
           <Pressable
             onPress={handlePickPicture}
-            disabled={loading || deciding}
+            disabled={loading || applying}
             style={({ pressed }) => pressed && styles.pressed}
           >
             <ThemedView type="backgroundSelected" style={styles.mainButton}>
               <ThemedText type="subtitle">
                 {loading
                   ? "Loading…"
-                  : deciding
+                  : applying
                     ? "Working…"
                     : hasPhoto
                       ? "Pick another picture"
@@ -341,6 +479,11 @@ export default function HomeScreen() {
                   size={18}
                 />
                 <ThemedText type="smallBold">Keep</ThemedText>
+                {pendingKeep.length > 0 && (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    +{pendingKeep.length}
+                  </ThemedText>
+                )}
               </ThemedView>
             </Pressable>
 
@@ -362,18 +505,23 @@ export default function HomeScreen() {
                   size={18}
                 />
                 <ThemedText type="smallBold">Throw</ThemedText>
+                {pendingDelete.length > 0 && (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    +{pendingDelete.length}
+                  </ThemedText>
+                )}
               </ThemedView>
             </Pressable>
           </ThemedView>
 
-          {pendingDelete.length > 0 && (
-            <ThemedView style={styles.trashRow}>
+          {decisions.length > 0 && (
+            <ThemedView style={styles.pendingRow}>
               <Pressable
-                onPress={handleUndoThrow}
-                disabled={deciding}
+                onPress={handleUndo}
+                disabled={applying}
                 style={({ pressed }) => [
                   styles.decisionPressable,
-                  (pressed || deciding) && styles.pressed,
+                  (pressed || applying) && styles.pressed,
                 ]}
               >
                 <ThemedView
@@ -394,24 +542,19 @@ export default function HomeScreen() {
               </Pressable>
 
               <Pressable
-                onPress={handleEmptyTrash}
-                disabled={deciding}
+                onPress={handleApplyDecisions}
+                disabled={applying}
                 style={({ pressed }) => [
                   styles.decisionPressable,
-                  (pressed || deciding) && styles.pressed,
+                  (pressed || applying) && styles.pressed,
                 ]}
               >
                 <ThemedView
                   type="backgroundSelected"
                   style={styles.decisionButton}
                 >
-                  <SymbolView
-                    tintColor="#ff3b30"
-                    name={{ ios: "trash", android: "delete", web: "delete" }}
-                    size={18}
-                  />
                   <ThemedText type="smallBold">
-                    Delete {pendingDelete.length}
+                    {applying ? "Applying…" : `Apply ${decisions.length}`}
                   </ThemedText>
                 </ThemedView>
               </Pressable>
@@ -479,7 +622,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     alignSelf: "stretch",
   },
-  trashRow: {
+  pendingRow: {
     flexDirection: "row",
     gap: Spacing.three,
     alignSelf: "stretch",
