@@ -1,11 +1,11 @@
 import { Image } from "expo-image";
 import {
   Album,
+  Asset,
   AssetField,
   MediaType,
   Query,
   usePermissions,
-  type Asset,
 } from "expo-media-library";
 import { SymbolView } from "expo-symbols";
 import { useState } from "react";
@@ -46,6 +46,10 @@ export default function HomeScreen() {
   // hidden and both decision buttons are locked so a slow move/delete can't be
   // double-fired onto the same asset.
   const [deciding, setDeciding] = useState(false);
+  // Photos the user threw. Nothing has been deleted yet — they sit here until
+  // the user empties the trash, which deletes the whole buffer behind a single
+  // system confirmation. Until then every throw is undoable.
+  const [pendingDelete, setPendingDelete] = useState<Asset[]>([]);
 
   const hasPhoto = currentUri !== null;
   const showPhoto = hasPhoto && !deciding;
@@ -84,7 +88,8 @@ export default function HomeScreen() {
     return new Set(reviewed.map((asset) => asset.id));
   }
 
-  // Fetches a fresh batch of unreviewed photos from the gallery.
+  // Fetches a fresh batch of unreviewed photos from the gallery. Photos already
+  // kept, or sitting in the trash buffer awaiting deletion, are excluded.
   async function loadPhotoBatch() {
     const [batch, reviewedIds] = await Promise.all([
       new Query()
@@ -95,7 +100,10 @@ export default function HomeScreen() {
       loadReviewedIds(),
     ]);
 
-    return batch.filter((asset) => !reviewedIds.has(asset.id));
+    const trashedIds = new Set(pendingDelete.map((asset) => asset.id));
+    return batch.filter(
+      (asset) => !reviewedIds.has(asset.id) && !trashedIds.has(asset.id),
+    );
   }
 
   function clearPhoto() {
@@ -193,31 +201,28 @@ export default function HomeScreen() {
   }
 
   // Applies a decision to the photo on screen, then drops it from the queue and
-  // moves on to another random photo. Either way the photo leaves its original
-  // folder: kept photos move to the keep album, thrown photos are deleted.
+  // moves on to another random photo. Keeping moves the photo out of its
+  // original folder right away; throwing only buffers it for a later batch
+  // delete, so nothing is destroyed here.
   async function handleDecision(action: "keep" | "throw") {
     const asset = assets[index];
     if (!asset || deciding) return;
 
     // Hides the photo for the whole operation, so an asset that is being moved
-    // or deleted is never left on screen.
+    // is never left on screen.
     setDeciding(true);
     try {
       if (action === "keep") {
         await moveToKeepAlbum(asset);
       } else {
-        // Android surfaces its own delete confirmation here; a declined dialog
-        // rejects and leaves the photo in place.
-        await asset.delete();
+        setPendingDelete((prev) => [...prev, asset]);
       }
 
       setCurrentUri(null);
       await pickRandomPicture(assets.filter((_, i) => i !== index));
     } catch {
       Alert.alert(
-        action === "keep"
-          ? "Couldn't keep that photo"
-          : "Couldn't throw that photo",
+        "Couldn't keep that photo",
         "The photo was left where it is. Please try again.",
       );
     } finally {
@@ -231,6 +236,35 @@ export default function HomeScreen() {
 
   function handleThrow() {
     handleDecision("throw");
+  }
+
+  // Puts the most recently thrown photo back into the review queue.
+  function handleUndoThrow() {
+    if (pendingDelete.length === 0 || deciding) return;
+
+    const restored = pendingDelete[pendingDelete.length - 1];
+    setPendingDelete((prev) => prev.slice(0, -1));
+    pickRandomPicture([...assets, restored]);
+  }
+
+  // Deletes the whole trash buffer in one go. `Asset.delete` takes the entire
+  // list, so Android raises a single confirmation for every photo at once —
+  // declining it rejects and leaves the buffer untouched.
+  async function handleEmptyTrash() {
+    if (pendingDelete.length === 0 || deciding) return;
+
+    setDeciding(true);
+    try {
+      await Asset.delete(pendingDelete);
+      setPendingDelete([]);
+    } catch {
+      Alert.alert(
+        "Nothing was deleted",
+        "Your photos are still in the trash. You can try again or undo them.",
+      );
+    } finally {
+      setDeciding(false);
+    }
   }
 
   return (
@@ -331,6 +365,58 @@ export default function HomeScreen() {
               </ThemedView>
             </Pressable>
           </ThemedView>
+
+          {pendingDelete.length > 0 && (
+            <ThemedView style={styles.trashRow}>
+              <Pressable
+                onPress={handleUndoThrow}
+                disabled={deciding}
+                style={({ pressed }) => [
+                  styles.decisionPressable,
+                  (pressed || deciding) && styles.pressed,
+                ]}
+              >
+                <ThemedView
+                  type="backgroundElement"
+                  style={styles.decisionButton}
+                >
+                  <SymbolView
+                    tintColor={theme.text}
+                    name={{
+                      ios: "arrow.uturn.backward",
+                      android: "undo",
+                      web: "undo",
+                    }}
+                    size={18}
+                  />
+                  <ThemedText type="smallBold">Undo</ThemedText>
+                </ThemedView>
+              </Pressable>
+
+              <Pressable
+                onPress={handleEmptyTrash}
+                disabled={deciding}
+                style={({ pressed }) => [
+                  styles.decisionPressable,
+                  (pressed || deciding) && styles.pressed,
+                ]}
+              >
+                <ThemedView
+                  type="backgroundSelected"
+                  style={styles.decisionButton}
+                >
+                  <SymbolView
+                    tintColor="#ff3b30"
+                    name={{ ios: "trash", android: "delete", web: "delete" }}
+                    size={18}
+                  />
+                  <ThemedText type="smallBold">
+                    Delete {pendingDelete.length}
+                  </ThemedText>
+                </ThemedView>
+              </Pressable>
+            </ThemedView>
+          )}
         </ThemedView>
       </SafeAreaView>
     </ThemedView>
@@ -389,6 +475,11 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.three,
   },
   decisionRow: {
+    flexDirection: "row",
+    gap: Spacing.three,
+    alignSelf: "stretch",
+  },
+  trashRow: {
     flexDirection: "row",
     gap: Spacing.three,
     alignSelf: "stretch",

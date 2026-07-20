@@ -17,16 +17,19 @@ Primary target platform: **Android** (tested on emulator/device).
   lists albums/collections must exclude those that hold no images.
 - **Expo has changed.** Read the exact versioned docs at
   https://docs.expo.dev/versions/v57.0.0/ before writing any code.
-- **Deleting photos is destructive and irreversible.** Every discard must be
-  guarded by a confirmation the user actually sees. Today that guard is the
-  Android system delete dialog raised by `Asset.delete()` — a declined dialog
-  rejects and leaves the photo in place. Do not add a delete path that
-  bypasses it, and don't batch-delete without an explicit confirm step.
-- **A decision always moves the photo out of its original folder.** "Keep"
-  moves the asset into the `SwipeAndThrow` album (created on first use);
-  "Throw" deletes it. The photo on screen is hidden for the whole operation
-  and the decision buttons are locked, so an asset being moved or deleted is
-  never left visible or acted on twice.
+- **Deleting photos is destructive and irreversible.** "Throw" never deletes
+  on the spot — it buffers the asset in the in-memory trash (`pendingDelete`),
+  which is undoable. Deletion happens only when the user empties the trash,
+  which passes the whole buffer to `Asset.delete(assets)` so Android raises a
+  single system confirmation for the batch; declining it rejects and leaves
+  every photo in place. Never add a delete path that skips the buffer or that
+  confirmation.
+- **A decision moves the photo out of its original folder.** "Keep" moves the
+  asset into the `SwipeAndThrow` album (created on first use) immediately;
+  "Throw" removes it from the review queue and it leaves the folder for real
+  when the trash is emptied. The photo on screen is hidden for the whole
+  operation and the buttons are locked, so an asset being acted on is never
+  left visible or handled twice.
 
 ## Tech stack
 
