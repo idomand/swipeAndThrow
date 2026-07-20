@@ -1,6 +1,7 @@
 import ThemedContainer from "@/components/common/themedContainer";
 import { ThemedText } from "@/components/common/themedText";
 import { ThemedView } from "@/components/common/themedView";
+import SelectedImage from "@/components/SelectedImage";
 import { Spacing } from "@/constants/theme";
 import {
   APP_OWNED_MEDIA,
@@ -8,7 +9,6 @@ import {
   PHOTO_BATCH_SIZE,
 } from "@/constants/values";
 import { useTheme } from "@/hooks/useTheme";
-import { Image } from "expo-image";
 import {
   Album,
   Asset,
@@ -242,13 +242,6 @@ export default function HomeScreen() {
     pickRandomPicture(assets.filter((_, i) => i !== index));
   }
 
-  // Used when the queue has run out entirely and the user asks for more.
-  async function handlePickPicture() {
-    if (await checkPermission()) {
-      await pickRandomPicture();
-    }
-  }
-
   // Splits the kept photos by source folder. Each group becomes its own native
   // call, so a folder that refuses the operation only fails its own photos.
   async function groupKeepsByFolder(assetsToKeep: Asset[]) {
@@ -437,36 +430,11 @@ export default function HomeScreen() {
   return (
     <ThemedContainer>
       <ThemedView style={styles.actions}>
-        {showPhoto && (
-          <ThemedView type="backgroundElement" style={styles.photoCard}>
-            <Image
-              source={{ uri: currentUri }}
-              style={styles.photo}
-              contentFit="contain"
-            />
-            <ThemedText type="small" themeColor="textSecondary">
-              {assets.length} left
-            </ThemedText>
-          </ThemedView>
-        )}
-
-        <Pressable
-          onPress={showPhoto ? handleSkip : handlePickPicture}
-          disabled={loading || applying}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <ThemedView type="backgroundSelected" style={styles.mainButton}>
-            <ThemedText type="subtitle">
-              {loading
-                ? "Loading…"
-                : applying
-                  ? "Working…"
-                  : showPhoto
-                    ? "Skip"
-                    : "Pick a picture"}
-            </ThemedText>
-          </ThemedView>
-        </Pressable>
+        <SelectedImage
+          showPhoto={showPhoto}
+          currentUri={currentUri}
+          assets={assets}
+        />
 
         <ThemedView style={styles.decisionRow}>
           <Pressable
@@ -515,6 +483,24 @@ export default function HomeScreen() {
             </ThemedView>
           </Pressable>
         </ThemedView>
+
+        <Pressable
+          onPress={handleSkip}
+          disabled={loading || applying}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <ThemedView type="backgroundSelected" style={styles.skipButton}>
+            <ThemedText type="small">
+              {loading
+                ? "Loading…"
+                : applying
+                  ? "Working…"
+                  : showPhoto
+                    ? "Skip"
+                    : "Pick a picture"}
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
 
         {decisions.length > 0 && (
           <ThemedView style={styles.pendingRow}>
@@ -568,44 +554,17 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingTop: Spacing.two,
-  },
-  settingsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-  },
   actions: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     gap: Spacing.four,
   },
-  mainButton: {
-    paddingHorizontal: Spacing.five,
-    paddingVertical: Spacing.four,
+  skipButton: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
     borderRadius: Spacing.four,
     alignItems: "center",
-  },
-  photoCard: {
-    flex: 1,
-    alignSelf: "stretch",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.two,
-    padding: Spacing.three,
-    borderRadius: Spacing.four,
-  },
-  photo: {
-    flex: 1,
-    width: "100%",
-    borderRadius: Spacing.three,
   },
   decisionRow: {
     flexDirection: "row",
