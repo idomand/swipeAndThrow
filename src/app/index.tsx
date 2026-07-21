@@ -8,6 +8,9 @@ import {
   KEEP_ALBUM_TITLE,
   PHOTO_BATCH_SIZE,
 } from "@/constants/values";
+import { getErrorMessage } from "@/helpers/getErrorMessage";
+import { getFolderName } from "@/helpers/getFolderName";
+import { getRandomIndex } from "@/helpers/getRandomIndex";
 import { useTheme } from "@/hooks/useTheme";
 import {
   Album,
@@ -26,28 +29,6 @@ type Decision = { action: "keep" | "throw"; asset: Asset };
 // A set of photos that share a source folder, applied as one native call so a
 // folder that rejects the operation can't take the others down with it.
 type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-// Strips the filename off a file:// uri, leaving the containing folder.
-function folderOf(uri: string) {
-  return decodeURI(uri)
-    .replace(/^file:\/\//, "")
-    .replace(/\/[^/]*$/, "");
-}
-
-// A random position in [0, length), avoiding `exclude` so tapping "pick"
-// always lands on a different photo when there's more than one to choose from.
-function randomIndex(length: number, exclude: number) {
-  if (length <= 1) return 0;
-  let next = Math.floor(Math.random() * length);
-  while (next === exclude) {
-    next = Math.floor(Math.random() * length);
-  }
-  return next;
-}
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -165,7 +146,7 @@ export default function HomeScreen() {
     }
 
     // Only avoid the current index when we're re-picking from the same queue.
-    const nextIndex = randomIndex(next.length, next === assets ? index : -1);
+    const nextIndex = getRandomIndex(next.length, next === assets ? index : -1);
     setAssets(next);
     setIndex(nextIndex);
 
@@ -202,7 +183,7 @@ export default function HomeScreen() {
             // Where the album actually sits on disk, read off its first photo
             // (`getUri` returns a real file:// path). This is what decides
             // whether an album shows up next to the others in the gallery.
-            folder: photos[0] ? folderOf(await photos[0].getUri()) : "—",
+            folder: photos[0] ? getFolderName(await photos[0].getUri()) : "—",
           };
         }),
       );
@@ -248,7 +229,7 @@ export default function HomeScreen() {
     const groups = new Map<string, KeepGroup>();
 
     for (const asset of assetsToKeep) {
-      const folder = folderOf(await asset.getUri());
+      const folder = getFolderName(await asset.getUri());
       const group = groups.get(folder);
       if (group) {
         group.assets.push(asset);
@@ -380,7 +361,7 @@ export default function HomeScreen() {
           } catch (error) {
             console.log(`keep failed for ${group.folder}`, error);
             failures.push(
-              `Keeping ${group.assets.length} from ${group.folder}: ${errorMessage(error)}`,
+              `Keeping ${group.assets.length} from ${group.folder}: ${getErrorMessage(error)}`,
             );
           }
         }
@@ -388,7 +369,7 @@ export default function HomeScreen() {
         if (kept > 0) await verifyKeepAlbum();
       } catch (error) {
         console.log("keep phase failed", error);
-        failures.push(`Keeping photos: ${errorMessage(error)}`);
+        failures.push(`Keeping photos: ${getErrorMessage(error)}`);
       }
     }
 
@@ -400,7 +381,7 @@ export default function HomeScreen() {
       } catch (error) {
         console.log("throw batch failed", error);
         failures.push(
-          `Throwing ${pendingDelete.length}: ${errorMessage(error)}`,
+          `Throwing ${pendingDelete.length}: ${getErrorMessage(error)}`,
         );
       }
     }
