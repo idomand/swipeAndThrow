@@ -61,6 +61,8 @@ export default function HomeScreen() {
 
   const hasPhoto = currentUri !== null;
   const showPhoto = hasPhoto && !applying;
+  const hasDecisions = decisions.length > 0;
+  const disabledSubmitButton = !hasDecisions || applying;
 
   // Makes sure we're allowed to read the gallery, asking the user if needed.
   async function checkPermission() {
@@ -483,52 +485,46 @@ export default function HomeScreen() {
           </ThemedView>
         </Pressable>
 
-        {decisions.length > 0 && (
-          <ThemedView style={styles.pendingRow}>
-            <Pressable
-              onPress={handleUndo}
-              disabled={applying}
-              style={({ pressed }) => [
-                styles.decisionPressable,
-                (pressed || applying) && styles.pressed,
-              ]}
-            >
-              <ThemedView
-                type="backgroundElement"
-                style={styles.decisionButton}
-              >
-                <SymbolView
-                  tintColor={theme.text}
-                  name={{
-                    ios: "arrow.uturn.backward",
-                    android: "undo",
-                    web: "undo",
-                  }}
-                  size={18}
-                />
-                <ThemedText type="smallBold">Undo</ThemedText>
-              </ThemedView>
-            </Pressable>
+        <ThemedView style={styles.pendingRow}>
+          <Pressable
+            onPress={handleUndo}
+            disabled={disabledSubmitButton}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              pressed && styles.pressed,
+              disabledSubmitButton && styles.disabled,
+            ]}
+          >
+            <ThemedView type="backgroundElement" style={styles.decisionButton}>
+              <SymbolView
+                tintColor={theme.text}
+                name={{
+                  ios: "arrow.uturn.backward",
+                  android: "undo",
+                  web: "undo",
+                }}
+                size={18}
+              />
+              <ThemedText type="smallBold">Undo</ThemedText>
+            </ThemedView>
+          </Pressable>
 
-            <Pressable
-              onPress={handleApplyDecisions}
-              disabled={applying}
-              style={({ pressed }) => [
-                styles.decisionPressable,
-                (pressed || applying) && styles.pressed,
-              ]}
-            >
-              <ThemedView
-                type="backgroundSelected"
-                style={styles.decisionButton}
-              >
-                <ThemedText type="smallBold">
-                  {applying ? "Applying…" : `Apply ${decisions.length}`}
-                </ThemedText>
-              </ThemedView>
-            </Pressable>
-          </ThemedView>
-        )}
+          <Pressable
+            onPress={handleApplyDecisions}
+            disabled={disabledSubmitButton}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              pressed && styles.pressed,
+              disabledSubmitButton && styles.disabled,
+            ]}
+          >
+            <ThemedView type="backgroundSelected" style={styles.decisionButton}>
+              <ThemedText type="smallBold">
+                {applying ? "Applying…" : `Apply ${decisions.length}`}
+              </ThemedText>
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
       </ThemedView>
     </ThemedContainer>
   );
@@ -570,5 +566,8 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  disabled: {
+    opacity: 0.4,
   },
 });
