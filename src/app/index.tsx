@@ -20,6 +20,7 @@ import {
   Query,
   usePermissions,
 } from "expo-media-library";
+import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
@@ -412,6 +413,21 @@ export default function HomeScreen() {
 
   return (
     <ThemedContainer>
+      <ThemedView style={styles.header}>
+        <Pressable
+          onPress={() => router.push("/settings")}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <ThemedView type="backgroundElement" style={styles.cogButton}>
+            <SymbolView
+              tintColor={theme.text}
+              name={{ ios: "gearshape", android: "settings", web: "settings" }}
+              size={22}
+            />
+          </ThemedView>
+        </Pressable>
+      </ThemedView>
+
       <ThemedView style={styles.actions}>
         <SelectedImage
           showPhoto={showPhoto}
@@ -531,6 +547,15 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  header: {
+    alignSelf: "stretch",
+    alignItems: "flex-start",
+    paddingVertical: Spacing.two,
+  },
+  cogButton: {
+    padding: Spacing.two,
+    borderRadius: Spacing.four,
+  },
   actions: {
     flex: 1,
     justifyContent: "center",

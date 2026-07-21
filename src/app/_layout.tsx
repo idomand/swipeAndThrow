@@ -1,46 +1,32 @@
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
 import { Colors } from "@/constants/theme";
-import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useColorScheme } from "react-native";
 
 SplashScreen.preventAutoHideAsync();
 
-export default function TabLayout() {
+export default function RootLayout() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === "unspecified" ? "light" : scheme];
 
   return (
     <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      <NativeTabs
-        backgroundColor={colors.background}
-        indicatorColor={colors.backgroundElement}
-        labelStyle={{ selected: { color: colors.text } }}
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.text,
+        }}
       >
-        <NativeTabs.Trigger name="index">
-          <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require("@/assets/images/tabIcons/home.png")}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger>
-        {/* <NativeTabs.Trigger name="explore">
-          <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require("@/assets/images/tabIcons/explore.png")}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger> */}
-        <NativeTabs.Trigger name="settings">
-          <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-          <NativeTabs.Trigger.Icon
-            src={require("@/assets/images/tabIcons/explore.png")}
-            renderingMode="template"
-          />
-        </NativeTabs.Trigger>
-      </NativeTabs>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        {/* Reached from the cog in the home screen header. Full screen rather
+            than a sheet so the settings list gets the whole viewport. */}
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: "fullScreenModal", title: "Settings" }}
+        />
+      </Stack>
     </ThemeProvider>
   );
 }
