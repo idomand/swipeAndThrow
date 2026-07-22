@@ -1,14 +1,25 @@
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
 import { Colors } from "@/constants/theme";
+import { UserProvider } from "@/contexts/userContext";
+import { useResolvedScheme } from "@/hooks/useTheme";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useColorScheme } from "react-native";
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === "unspecified" ? "light" : scheme];
+  return (
+    <UserProvider>
+      <RootNavigator />
+    </UserProvider>
+  );
+}
+
+// Split out from RootLayout so it can read the saved theme preference — the
+// hook only works below the provider.
+function RootNavigator() {
+  const scheme = useResolvedScheme();
+  const colors = Colors[scheme];
 
   return (
     <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>

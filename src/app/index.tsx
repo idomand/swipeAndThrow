@@ -3,11 +3,8 @@ import { ThemedText } from "@/components/common/themedText";
 import { ThemedView } from "@/components/common/themedView";
 import SelectedImage from "@/components/SelectedImage";
 import { Spacing } from "@/constants/theme";
-import {
-  APP_OWNED_MEDIA,
-  KEEP_ALBUM_TITLE,
-  PHOTO_BATCH_SIZE,
-} from "@/constants/values";
+import { APP_OWNED_MEDIA } from "@/constants/values";
+import { useUserContext } from "@/contexts/userContext";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { getFolderName } from "@/helpers/getFolderName";
 import { getRandomIndex } from "@/helpers/getRandomIndex";
@@ -33,6 +30,7 @@ type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const { settings } = useUserContext();
   const [permission, requestPermission] = usePermissions();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [index, setIndex] = useState(0);
@@ -84,7 +82,7 @@ export default function HomeScreen() {
   // Ids of the photos already sorted into the keep album, so they never come
   // back around for a second review.
   async function loadReviewedIds() {
-    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
+    const keepAlbum = await Album.get(settings.keepAlbumTitle);
     if (!keepAlbum) return new Set<string>();
 
     const reviewed = await new Query()
@@ -103,7 +101,7 @@ export default function HomeScreen() {
       new Query()
         .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
         .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
-        .limit(PHOTO_BATCH_SIZE)
+        .limit(settings.photoBatchSize)
         .exe(),
       loadReviewedIds(),
     ]);
@@ -256,7 +254,7 @@ export default function HomeScreen() {
       // into the album (`moveAssets: false`) and delete the originals. The copy
       // needs no permission dialog — the new file belongs to us — but the
       // delete does.
-      await Album.create(KEEP_ALBUM_TITLE, group.assets, false);
+      await Album.create(settings.keepAlbumTitle, group.assets, false);
 
       try {
         await Asset.delete(group.assets);
@@ -270,7 +268,7 @@ export default function HomeScreen() {
       return null;
     }
 
-    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
+    const keepAlbum = await Album.get(settings.keepAlbumTitle);
     if (keepAlbum) {
       // The native binding takes `List<Asset>`, and nothing in the JS layer
       // wraps a lone asset despite what the types claim — always pass an array.
@@ -278,7 +276,7 @@ export default function HomeScreen() {
     } else {
       // `moveAssets` defaults to true natively, but pass it explicitly so the
       // move-vs-copy behavior is visible here.
-      await Album.create(KEEP_ALBUM_TITLE, group.assets, true);
+      await Album.create(settings.keepAlbumTitle, group.assets, true);
     }
 
     return null;
@@ -288,10 +286,10 @@ export default function HomeScreen() {
   // strand photos outside their original folders. Read it back from MediaStore
   // and fail loudly if it isn't there.
   async function verifyKeepAlbum() {
-    const saved = await Album.get(KEEP_ALBUM_TITLE);
+    const saved = await Album.get(settings.keepAlbumTitle);
     if (!saved) {
       throw new Error(
-        `Photos were moved, but no "${KEEP_ALBUM_TITLE}" album is registered in MediaStore.`,
+        `Photos were moved, but no "${settings.keepAlbumTitle}" album is registered in MediaStore.`,
       );
     }
 
@@ -300,7 +298,7 @@ export default function HomeScreen() {
       .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
       .exeForMetadata();
     console.log(
-      `Keep album "${KEEP_ALBUM_TITLE}" (id ${saved.id}) now holds ${contents.length} photo(s).`,
+      `Keep album "${settings.keepAlbumTitle}" (id ${saved.id}) now holds ${contents.length} photo(s).`,
     );
   }
 

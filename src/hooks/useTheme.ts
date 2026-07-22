@@ -4,11 +4,19 @@
  */
 
 import { Colors } from "@/constants/theme";
+import { useUserContext } from "@/contexts/userContext";
 import { useColorScheme } from "react-native";
 
-export function useTheme() {
-  const scheme = useColorScheme();
-  const theme = scheme === "unspecified" ? "light" : scheme;
+// The scheme actually in effect: the user's saved preference when they've
+// picked one, otherwise whatever the OS reports.
+export function useResolvedScheme(): "light" | "dark" {
+  const systemScheme = useColorScheme();
+  const { settings } = useUserContext();
 
-  return Colors[theme];
+  if (settings.themePreference !== "system") return settings.themePreference;
+  return systemScheme === "dark" ? "dark" : "light";
+}
+
+export function useTheme() {
+  return Colors[useResolvedScheme()];
 }
