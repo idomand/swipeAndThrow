@@ -1,13 +1,13 @@
 import ThemedContainer from "@/components/common/themedContainer";
 import { ThemedText } from "@/components/common/themedText";
 import { ThemedView } from "@/components/common/themedView";
-import SelectedImage from "@/components/SelectedImage";
+import PhotoCard from "@/components/PhotoCard";
+import SwipeLabel from "@/components/SwipeLabel";
 import { Spacing } from "@/constants/theme";
-import { APP_OWNED_MEDIA } from "@/constants/values";
+import { APP_OWNED_MEDIA, KEEP_ALBUM_TITLE } from "@/constants/values";
 import { useUserContext } from "@/contexts/userContext";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { getFolderName } from "@/helpers/getFolderName";
-import { getRandomIndex } from "@/helpers/getRandomIndex";
 import { useTheme } from "@/hooks/useTheme";
 import {
   Album,
@@ -19,27 +19,57 @@ import {
 } from "expo-media-library";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
+import { Swiper, type SwiperCardRefType } from "rn-swiper-list";
 
 type Decision = { action: "keep" | "throw"; asset: Asset };
+
+// One swipe made this session, newest last. Used only to reverse the last one:
+// "keep"/"throw" pop from `decisions`, "skip" pops from `skippedIds`.
+type SwipeAction = "keep" | "throw" | "skip";
+
+// A photo in the deck, with its uri resolved up front so the whole card stack
+// can render at once — the swiper needs every card ready, not one at a time.
+type PhotoCardData = { asset: Asset; uri: string };
+
+// The plain, serializable shape handed to the swiper. `Asset` is a
+// native-backed class the swiper's worklets can't copy to the UI thread
+// ("Cannot copy value of type Asset"), so the asset itself never goes in —
+// the swipe callbacks look it up by deck position through `cardsRef` instead.
+type DeckItem = { id: string; uri: string };
 
 // A set of photos that share a source folder, applied as one native call so a
 // folder that rejects the operation can't take the others down with it.
 type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
 
+// Fixed overlay badges the swiper fades in as a card is dragged, one per
+// direction. Defined at module scope so their identity is stable.
+function KeepLabel() {
+  return <SwipeLabel text="Keep" color="#34c759" align="right" />;
+}
+function ThrowLabel() {
+  return <SwipeLabel text="Throw" color="#ff3b30" align="left" />;
+}
+function SkipLabel() {
+  return <SwipeLabel text="Skip" color="#8e8e93" align="center" />;
+}
+
 export default function HomeScreen() {
   const theme = useTheme();
   const { settings } = useUserContext();
   const [permission, requestPermission] = usePermissions();
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [index, setIndex] = useState(0);
-  const [currentUri, setCurrentUri] = useState<string | null>(null);
+
+  // The current deck of photos and how far through it the user has swiped.
+  // `batchKey` remounts the swiper on every new batch so its internal index
+  // resets to the top of the fresh stack.
+  const [cards, setCards] = useState<PhotoCardData[]>([]);
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [batchKey, setBatchKey] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // True while the buffered decisions are being applied to the gallery. The
-  // photo is hidden and every button is locked so a slow move/delete can't be
-  // fired twice.
+  // True while the buffered decisions are being applied to the gallery. Every
+  // swipe and button is locked so a slow move/delete can't be fired twice.
   const [applying, setApplying] = useState(false);
   // Every decision the user has made, in order. Nothing has touched the
   // gallery yet — photos stay in their original folders until the user applies
@@ -50,6 +80,36 @@ export default function HomeScreen() {
   // Photos skipped this session. They keep their place in the gallery — the
   // ids only stop them coming back around before the app is restarted.
   const [skippedIds, setSkippedIds] = useState<string[]>([]);
+  // Swipes made in the current deck, so Undo knows what the last one was and
+  // which buffer to pop. Reset per batch (and on apply): the swiper can only
+  // spring a card back within the deck that's still on screen.
+  const [history, setHistory] = useState<SwipeAction[]>([]);
+
+  // Imperative handle on the deck so the Keep/Throw/Skip buttons drive the same
+  // swipes as the gestures, and Undo can spring the last card back.
+  const swiperRef = useRef<SwiperCardRefType>(null);
+
+  // `onSwipedAll` fires from a worklet reaction that captured an earlier
+  // render's closures, and the swipe callbacks are memoized. Reading the
+  // exclusion sets and current cards through refs keeps the next batch filtered
+  // against the latest decisions, and each swipe looking up the live deck.
+  const decisionsRef = useRef(decisions);
+  const skippedIdsRef = useRef(skippedIds);
+  const cardsRef = useRef(cards);
+  const loadingRef = useRef(false);
+
+  useEffect(() => {
+    decisionsRef.current = decisions;
+    skippedIdsRef.current = skippedIds;
+    cardsRef.current = cards;
+  }, [decisions, skippedIds, cards]);
+
+  // What the swiper actually renders: the same order as `cards`, but stripped
+  // to serializable fields so nothing native crosses into a worklet.
+  const deckData = useMemo<DeckItem[]>(
+    () => cards.map((card) => ({ id: card.asset.id, uri: card.uri })),
+    [cards],
+  );
 
   const pendingKeep = decisions
     .filter((decision) => decision.action === "keep")
@@ -58,10 +118,12 @@ export default function HomeScreen() {
     .filter((decision) => decision.action === "throw")
     .map((decision) => decision.asset);
 
-  const hasPhoto = currentUri !== null;
-  const showPhoto = hasPhoto && !applying;
+  const hasDeck = cards.length > 0;
+  const hasCard = hasDeck && activeCardIndex < cards.length;
+  const canSwipe = hasCard && !applying && !loading;
+  const remaining = cards.length - activeCardIndex;
   const hasDecisions = decisions.length > 0;
-  const disabledSubmitButton = !hasDecisions || applying;
+  const canUndo = history.length > 0 && !applying && !loading;
 
   // Makes sure we're allowed to read the gallery, asking the user if needed.
   async function checkPermission() {
@@ -82,7 +144,7 @@ export default function HomeScreen() {
   // Ids of the photos already sorted into the keep album, so they never come
   // back around for a second review.
   async function loadReviewedIds() {
-    const keepAlbum = await Album.get(settings.keepAlbumTitle);
+    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
     if (!keepAlbum) return new Set<string>();
 
     const reviewed = await new Query()
@@ -95,7 +157,8 @@ export default function HomeScreen() {
 
   // Fetches a fresh batch of unreviewed photos from the gallery. Photos already
   // in the keep album, or awaiting a decision in the pending buffer, are
-  // excluded so nothing comes up for review twice.
+  // excluded so nothing comes up for review twice. Reads the exclusion sets
+  // through refs so a call from `onSwipedAll` sees the latest decisions.
   async function loadPhotoBatch() {
     const [batch, reviewedIds] = await Promise.all([
       new Query()
@@ -106,8 +169,10 @@ export default function HomeScreen() {
       loadReviewedIds(),
     ]);
 
-    const decidedIds = new Set(decisions.map((decision) => decision.asset.id));
-    const skipped = new Set(skippedIds);
+    const decidedIds = new Set(
+      decisionsRef.current.map((decision) => decision.asset.id),
+    );
+    const skipped = new Set(skippedIdsRef.current);
     return batch.filter(
       (asset) =>
         !reviewedIds.has(asset.id) &&
@@ -116,55 +181,46 @@ export default function HomeScreen() {
     );
   }
 
-  function clearPhoto() {
-    setAssets([]);
-    setIndex(0);
-    setCurrentUri(null);
-  }
-
-  // Shows a random photo from `queue`, refilling from the gallery first when
-  // the queue has run dry. Assets whose uri can't be resolved (moved or deleted
-  // behind our back) are dropped and another one is picked in their place.
-  async function pickRandomPicture(queue: Asset[] = assets) {
-    let next = queue;
-
-    if (next.length === 0) {
-      try {
-        setLoading(true);
-        next = await loadPhotoBatch();
-      } catch {
-        Alert.alert("Something went wrong", "Couldn't load your photos.");
-        return;
-      } finally {
-        setLoading(false);
-      }
-
-      if (next.length === 0) {
-        clearPhoto();
-        Alert.alert("All caught up", "No photos left to review.");
-        return;
-      }
-    }
-
-    // Only avoid the current index when we're re-picking from the same queue.
-    const nextIndex = getRandomIndex(next.length, next === assets ? index : -1);
-    setAssets(next);
-    setIndex(nextIndex);
+  // Loads the next deck: pulls a batch, resolves each photo's uri (dropping any
+  // that can't be — moved or deleted behind our back), then remounts the swiper
+  // on the fresh stack. Guarded so overlapping loads can't stack up.
+  const loadBatch = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setLoading(true);
 
     try {
-      const info = await next[nextIndex].getInfo();
-      setCurrentUri(info.uri);
-    } catch {
-      setCurrentUri(null);
-      const remaining = next.filter((_, i) => i !== nextIndex);
-      if (remaining.length === 0) {
-        clearPhoto();
+      const batch = await loadPhotoBatch();
+      const resolved = await Promise.all(
+        batch.map(async (asset) => {
+          try {
+            const info = await asset.getInfo();
+            return { asset, uri: info.uri } as PhotoCardData;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const next = resolved.filter(
+        (card): card is PhotoCardData => card !== null,
+      );
+
+      setCards(next);
+      setActiveCardIndex(0);
+      setHistory([]);
+      setBatchKey((key) => key + 1);
+
+      if (next.length === 0) {
         Alert.alert("All caught up", "No photos left to review.");
-        return;
       }
-      await pickRandomPicture(remaining);
+    } catch {
+      Alert.alert("Something went wrong", "Couldn't load your photos.");
+    } finally {
+      setLoading(false);
+      loadingRef.current = false;
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.photoBatchSize]);
 
   // Debug helper: dumps the gallery's photo albums to the console. Albums with
   // no images (music, video-only, …) are filtered out — this app is photos only.
@@ -196,7 +252,7 @@ export default function HomeScreen() {
     }
   }
 
-  // Loads the first batch as soon as the app opens, so there's a photo waiting
+  // Loads the first batch as soon as the app opens, so there's a deck waiting
   // instead of an empty screen. Runs once — the permission prompt is part of it.
   useEffect(() => {
     let active = true;
@@ -204,7 +260,7 @@ export default function HomeScreen() {
     (async () => {
       if (!(await checkPermission()) || !active) return;
       await logAlbums();
-      if (active) await pickRandomPicture([]);
+      if (active) await loadBatch();
     })();
 
     return () => {
@@ -213,15 +269,104 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Moves past the current photo without deciding anything. The photo is left
-  // exactly where it is; it just won't come up again this session.
-  function handleSkip() {
-    const asset = assets[index];
-    if (!asset || applying) return;
+  // Records a keep/throw decision. Nothing touches the gallery here — both
+  // kinds only join the pending buffer, so every one of them stays undoable
+  // until the batch is applied.
+  const recordDecision = useCallback(
+    (action: "keep" | "throw", asset: Asset) => {
+      setDecisions((prev) => [...prev, { action, asset }]);
+      setHistory((prev) => [...prev, action]);
+    },
+    [],
+  );
 
+  // Records a skip. The photo is left exactly where it is; the id just stops it
+  // coming up again this session.
+  const recordSkip = useCallback((asset: Asset) => {
     setSkippedIds((prev) => [...prev, asset.id]);
-    setCurrentUri(null);
-    pickRandomPicture(assets.filter((_, i) => i !== index));
+    setHistory((prev) => [...prev, "skip"]);
+  }, []);
+
+  // Swipe callbacks. `index` is the card's position in the deck; `cardsRef`
+  // keeps the lookup pointed at the live deck without re-subscribing the
+  // gesture handlers on every render.
+  // The card at `index` is leaving, so the next one becomes active. Advance the
+  // render window here too — not just from the swiper's `onIndexChange`, which
+  // can lag — so the newly centered card always has its image already decoded.
+  const advanceWindow = useCallback((index: number) => {
+    setActiveCardIndex((current) => Math.max(current, index + 1));
+  }, []);
+
+  const handleSwipeRight = useCallback(
+    (index: number) => {
+      const card = cardsRef.current[index];
+      if (card) recordDecision("keep", card.asset);
+      advanceWindow(index);
+    },
+    [recordDecision, advanceWindow],
+  );
+  const handleSwipeLeft = useCallback(
+    (index: number) => {
+      const card = cardsRef.current[index];
+      if (card) recordDecision("throw", card.asset);
+      advanceWindow(index);
+    },
+    [recordDecision, advanceWindow],
+  );
+  const handleSwipeTop = useCallback(
+    (index: number) => {
+      const card = cardsRef.current[index];
+      if (card) recordSkip(card.asset);
+      advanceWindow(index);
+    },
+    [recordSkip, advanceWindow],
+  );
+  const handleIndexChange = useCallback((index: number) => {
+    setActiveCardIndex(index);
+  }, []);
+
+  // Renders a card's contents. The swiper mounts every card in the batch up
+  // front, so decoding all ~50 full-size images at once would blow memory and
+  // leave later cards blank. Only cards near the top of the stack get their
+  // image; the window reaches a few ahead so the next photo is already decoded
+  // when it surfaces.
+  const renderCard = useCallback(
+    (item: DeckItem, index: number) => {
+      const near = index >= activeCardIndex - 1 && index <= activeCardIndex + 3;
+      return <PhotoCard uri={near ? item.uri : null} />;
+    },
+    [activeCardIndex],
+  );
+
+  // Buttons drive the deck through its ref so a tap makes exactly the same
+  // swipe a gesture would — a single code path records every decision.
+  function handleKeep() {
+    if (!canSwipe) return;
+    swiperRef.current?.swipeRight();
+  }
+  function handleThrow() {
+    if (!canSwipe) return;
+    swiperRef.current?.swipeLeft();
+  }
+  function handleSkip() {
+    if (!canSwipe) return;
+    swiperRef.current?.swipeTop();
+  }
+
+  // Reverses the most recent swipe, whichever kind it was, and springs that
+  // card back to the top of the deck. Limited to the deck on screen — the
+  // swiper can't restore a card from a batch it has already replaced.
+  function handleUndo() {
+    if (!canUndo) return;
+    const last = history[history.length - 1];
+
+    setHistory((prev) => prev.slice(0, -1));
+    if (last === "skip") {
+      setSkippedIds((prev) => prev.slice(0, -1));
+    } else {
+      setDecisions((prev) => prev.slice(0, -1));
+    }
+    swiperRef.current?.swipeBack();
   }
 
   // Splits the kept photos by source folder. Each group becomes its own native
@@ -254,7 +399,7 @@ export default function HomeScreen() {
       // into the album (`moveAssets: false`) and delete the originals. The copy
       // needs no permission dialog — the new file belongs to us — but the
       // delete does.
-      await Album.create(settings.keepAlbumTitle, group.assets, false);
+      await Album.create(KEEP_ALBUM_TITLE, group.assets, false);
 
       try {
         await Asset.delete(group.assets);
@@ -268,7 +413,7 @@ export default function HomeScreen() {
       return null;
     }
 
-    const keepAlbum = await Album.get(settings.keepAlbumTitle);
+    const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
     if (keepAlbum) {
       // The native binding takes `List<Asset>`, and nothing in the JS layer
       // wraps a lone asset despite what the types claim — always pass an array.
@@ -276,7 +421,7 @@ export default function HomeScreen() {
     } else {
       // `moveAssets` defaults to true natively, but pass it explicitly so the
       // move-vs-copy behavior is visible here.
-      await Album.create(settings.keepAlbumTitle, group.assets, true);
+      await Album.create(KEEP_ALBUM_TITLE, group.assets, true);
     }
 
     return null;
@@ -286,10 +431,10 @@ export default function HomeScreen() {
   // strand photos outside their original folders. Read it back from MediaStore
   // and fail loudly if it isn't there.
   async function verifyKeepAlbum() {
-    const saved = await Album.get(settings.keepAlbumTitle);
+    const saved = await Album.get(KEEP_ALBUM_TITLE);
     if (!saved) {
       throw new Error(
-        `Photos were moved, but no "${settings.keepAlbumTitle}" album is registered in MediaStore.`,
+        `Photos were moved, but no "${KEEP_ALBUM_TITLE}" album is registered in MediaStore.`,
       );
     }
 
@@ -298,38 +443,8 @@ export default function HomeScreen() {
       .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
       .exeForMetadata();
     console.log(
-      `Keep album "${settings.keepAlbumTitle}" (id ${saved.id}) now holds ${contents.length} photo(s).`,
+      `Keep album "${KEEP_ALBUM_TITLE}" (id ${saved.id}) now holds ${contents.length} photo(s).`,
     );
-  }
-
-  // Records a decision and moves on. Nothing touches the gallery here — both
-  // kinds of decision only join the pending buffer, so every one of them stays
-  // undoable until the batch is applied.
-  function handleDecision(action: "keep" | "throw") {
-    const asset = assets[index];
-    if (!asset || applying) return;
-
-    setDecisions((prev) => [...prev, { action, asset }]);
-    setCurrentUri(null);
-    pickRandomPicture(assets.filter((_, i) => i !== index));
-  }
-
-  function handleKeep() {
-    handleDecision("keep");
-  }
-
-  function handleThrow() {
-    handleDecision("throw");
-  }
-
-  // Reverses the most recent decision, whichever kind it was, and puts that
-  // photo back into the review queue.
-  function handleUndo() {
-    const last = decisions[decisions.length - 1];
-    if (!last || applying) return;
-
-    setDecisions((prev) => prev.slice(0, -1));
-    pickRandomPicture([...assets, last.asset]);
   }
 
   // Applies the whole buffer: moves the kept photos first, then deletes the
@@ -391,6 +506,9 @@ export default function HomeScreen() {
     setDecisions((prev) =>
       prev.filter((decision) => !applied.has(decision.asset.id)),
     );
+    // Applied swipes are committed to the gallery now, so a spring-back would
+    // no longer map to the buffer — drop the deck's undo history.
+    setHistory([]);
     setApplying(false);
 
     // Nothing is shown on success — the system dialogs already confirmed it.
@@ -427,42 +545,62 @@ export default function HomeScreen() {
       </ThemedView>
 
       <ThemedView style={styles.actions}>
-        <SelectedImage
-          showPhoto={showPhoto}
-          currentUri={currentUri}
-          assets={assets}
-        />
+        <ThemedView style={styles.deck}>
+          {hasDeck ? (
+            <Swiper
+              key={batchKey}
+              ref={swiperRef}
+              data={deckData}
+              keyExtractor={(item) => item.id}
+              renderCard={renderCard}
+              prerenderItems={3}
+              cardStyle={styles.card}
+              onSwipeRight={handleSwipeRight}
+              onSwipeLeft={handleSwipeLeft}
+              onSwipeTop={handleSwipeTop}
+              onIndexChange={handleIndexChange}
+              onSwipedAll={loadBatch}
+              disableBottomSwipe
+              disableRightSwipe={applying}
+              disableLeftSwipe={applying}
+              disableTopSwipe={applying}
+              OverlayLabelRight={KeepLabel}
+              OverlayLabelLeft={ThrowLabel}
+              OverlayLabelTop={SkipLabel}
+            />
+          ) : (
+            <ThemedView type="backgroundElement" style={styles.placeholder}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {loading ? "Loading…" : "No photos to review"}
+              </ThemedText>
+              {!loading && (
+                <Pressable
+                  onPress={loadBatch}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  <ThemedView
+                    type="backgroundSelected"
+                    style={styles.skipButton}
+                  >
+                    <ThemedText type="small">Check again</ThemedText>
+                  </ThemedView>
+                </Pressable>
+              )}
+            </ThemedView>
+          )}
+        </ThemedView>
+
+        <ThemedText type="small" themeColor="textSecondary">
+          {hasCard ? `${remaining} left` : ""}
+        </ThemedText>
 
         <ThemedView style={styles.decisionRow}>
           <Pressable
-            onPress={handleKeep}
-            disabled={!showPhoto}
-            style={({ pressed }) => [
-              styles.decisionPressable,
-              (pressed || !showPhoto) && styles.pressed,
-            ]}
-          >
-            <ThemedView type="backgroundElement" style={styles.decisionButton}>
-              <SymbolView
-                tintColor="#34c759"
-                name={{ ios: "checkmark", android: "check", web: "check" }}
-                size={18}
-              />
-              <ThemedText type="smallBold">Keep</ThemedText>
-              {pendingKeep.length > 0 && (
-                <ThemedText type="small" themeColor="textSecondary">
-                  +{pendingKeep.length}
-                </ThemedText>
-              )}
-            </ThemedView>
-          </Pressable>
-
-          <Pressable
             onPress={handleThrow}
-            disabled={!showPhoto}
+            disabled={!canSwipe}
             style={({ pressed }) => [
               styles.decisionPressable,
-              (pressed || !showPhoto) && styles.pressed,
+              (pressed || !canSwipe) && styles.pressed,
             ]}
           >
             <ThemedView type="backgroundElement" style={styles.decisionButton}>
@@ -479,34 +617,61 @@ export default function HomeScreen() {
               )}
             </ThemedView>
           </Pressable>
-        </ThemedView>
 
-        <Pressable
-          onPress={handleSkip}
-          disabled={loading || applying}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <ThemedView type="backgroundSelected" style={styles.skipButton}>
-            <ThemedText type="small">
-              {loading
-                ? "Loading…"
-                : applying
-                  ? "Working…"
-                  : showPhoto
-                    ? "Skip"
-                    : "Pick a picture"}
-            </ThemedText>
-          </ThemedView>
-        </Pressable>
+          <Pressable
+            onPress={handleSkip}
+            disabled={!canSwipe}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              (pressed || !canSwipe) && styles.pressed,
+            ]}
+          >
+            <ThemedView type="backgroundSelected" style={styles.decisionButton}>
+              <SymbolView
+                tintColor={theme.text}
+                name={{
+                  ios: "arrow.up",
+                  android: "arrow_upward",
+                  web: "arrow_upward",
+                }}
+                size={18}
+              />
+              <ThemedText type="smallBold">Skip</ThemedText>
+            </ThemedView>
+          </Pressable>
+
+          <Pressable
+            onPress={handleKeep}
+            disabled={!canSwipe}
+            style={({ pressed }) => [
+              styles.decisionPressable,
+              (pressed || !canSwipe) && styles.pressed,
+            ]}
+          >
+            <ThemedView type="backgroundElement" style={styles.decisionButton}>
+              <SymbolView
+                tintColor="#34c759"
+                name={{ ios: "checkmark", android: "check", web: "check" }}
+                size={18}
+              />
+              <ThemedText type="smallBold">Keep</ThemedText>
+              {pendingKeep.length > 0 && (
+                <ThemedText type="small" themeColor="textSecondary">
+                  +{pendingKeep.length}
+                </ThemedText>
+              )}
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
 
         <ThemedView style={styles.pendingRow}>
           <Pressable
             onPress={handleUndo}
-            disabled={disabledSubmitButton}
+            disabled={!canUndo}
             style={({ pressed }) => [
               styles.decisionPressable,
               pressed && styles.pressed,
-              disabledSubmitButton && styles.disabled,
+              !canUndo && styles.disabled,
             ]}
           >
             <ThemedView type="backgroundElement" style={styles.decisionButton}>
@@ -525,11 +690,11 @@ export default function HomeScreen() {
 
           <Pressable
             onPress={handleApplyDecisions}
-            disabled={disabledSubmitButton}
+            disabled={!hasDecisions || applying}
             style={({ pressed }) => [
               styles.decisionPressable,
               pressed && styles.pressed,
-              disabledSubmitButton && styles.disabled,
+              (!hasDecisions || applying) && styles.disabled,
             ]}
           >
             <ThemedView type="backgroundSelected" style={styles.decisionButton}>
@@ -559,6 +724,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     gap: Spacing.four,
+  },
+  deck: {
+    flex: 1,
+    alignSelf: "stretch",
+    // Clip cards to the frame so a swiped card disappears at the deck's edge
+    // instead of flying across the rest of the screen — the next card stays
+    // centered in a fixed photo frame.
+    overflow: "hidden",
+    borderRadius: Spacing.four,
+  },
+  card: {
+    width: "100%",
+    height: "100%",
+  },
+  placeholder: {
+    flex: 1,
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Spacing.four,
   },
   skipButton: {
     paddingHorizontal: Spacing.three,

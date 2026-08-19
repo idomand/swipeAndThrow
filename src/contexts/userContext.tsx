@@ -1,4 +1,4 @@
-import { KEEP_ALBUM_TITLE, PHOTO_BATCH_SIZE } from "@/constants/values";
+import { PHOTO_BATCH_SIZE } from "@/constants/values";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, use, useEffect, useState, type ReactNode } from "react";
 
@@ -11,8 +11,8 @@ export type UserSettings = {
   photoBatchSize: number;
   // Overrides the OS color scheme when set to something other than "system".
   themePreference: ThemePreference;
-  // Album kept photos are moved into, and the marker for "already reviewed".
-  keepAlbumTitle: string;
+  // Album ids the app draws photos from. Empty means every album is fair game.
+  selectedAlbumIds: string[];
 };
 
 // Falls back to the compiled-in constants, so a fresh install behaves exactly
@@ -20,7 +20,7 @@ export type UserSettings = {
 const DEFAULT_SETTINGS: UserSettings = {
   photoBatchSize: PHOTO_BATCH_SIZE,
   themePreference: "system",
-  keepAlbumTitle: KEEP_ALBUM_TITLE,
+  selectedAlbumIds: [],
 };
 
 // One key holding the whole object rather than a key per setting: a single

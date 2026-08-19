@@ -4,6 +4,7 @@ import { UserProvider } from "@/contexts/userContext";
 import { useResolvedScheme } from "@/hooks/useTheme";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -22,22 +23,26 @@ function RootNavigator() {
   const colors = Colors[scheme];
 
   return (
-    <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.background },
-          headerTintColor: colors.text,
-        }}
-      >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        {/* Reached from the cog in the home screen header. Full screen rather
-            than a sheet so the settings list gets the whole viewport. */}
-        <Stack.Screen
-          name="settings"
-          options={{ presentation: "fullScreenModal", title: "Settings" }}
-        />
-      </Stack>
-    </ThemeProvider>
+    // Required by react-native-gesture-handler so the swipe deck on the home
+    // screen receives gestures. Must wrap the whole navigation tree.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>
+        <AnimatedSplashOverlay />
+        <Stack
+          screenOptions={{
+            headerStyle: { backgroundColor: colors.background },
+            headerTintColor: colors.text,
+          }}
+        >
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          {/* Reached from the cog in the home screen header. Full screen rather
+              than a sheet so the settings list gets the whole viewport. */}
+          <Stack.Screen
+            name="settings"
+            options={{ presentation: "fullScreenModal", title: "Settings" }}
+          />
+        </Stack>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

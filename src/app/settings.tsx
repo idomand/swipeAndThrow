@@ -1,7 +1,7 @@
 import ThemedContainer from "@/components/common/themedContainer";
 import { ThemedView } from "@/components/common/themedView";
-import { KeepAlbumInput } from "@/components/settings/keepAlbumInput";
 import { OptionSelector } from "@/components/settings/optionSelector";
+import { SelectAlbums } from "@/components/settings/selectAlbums";
 import { SettingsButton } from "@/components/settings/settingsButton";
 import { Spacing } from "@/constants/theme";
 import { useUserContext, type ThemePreference } from "@/contexts/userContext";
@@ -42,10 +42,7 @@ export default function Settings() {
           onSelect={(preference) => setSetting("themePreference", preference)}
         />
 
-        <KeepAlbumInput
-          value={settings.keepAlbumTitle}
-          onChangeText={(text) => setSetting("keepAlbumTitle", text)}
-        />
+        <SelectAlbums />
 
         <ThemedView style={styles.footer}>
           <SettingsButton label="Reset to defaults" onPress={resetSettings} />
