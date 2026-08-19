@@ -1,4 +1,5 @@
-export const PHOTO_BATCH_SIZE = 50;
+// Fixed number of photos each batch draws. Not user-configurable.
+export const PHOTO_BATCH_SIZE = 20;
 
 // Gallery album kept photos are moved into. Doubles as the "already reviewed"
 // marker: assets living here are filtered out of new batches.

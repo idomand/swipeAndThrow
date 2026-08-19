@@ -1,4 +1,3 @@
-import { PHOTO_BATCH_SIZE } from "@/constants/values";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, use, useEffect, useState, type ReactNode } from "react";
 
@@ -7,8 +6,6 @@ export type ThemePreference = "light" | "dark" | "system";
 // App-wide user settings. Everything here survives a restart — see the
 // storage note below for what that means for the decisions buffer.
 export type UserSettings = {
-  // How many photos each gallery query pulls in one batch.
-  photoBatchSize: number;
   // Overrides the OS color scheme when set to something other than "system".
   themePreference: ThemePreference;
   // Album ids the app draws photos from. Empty means every album is fair game.
@@ -18,7 +15,6 @@ export type UserSettings = {
 // Falls back to the compiled-in constants, so a fresh install behaves exactly
 // as it did before settings existed.
 const DEFAULT_SETTINGS: UserSettings = {
-  photoBatchSize: PHOTO_BATCH_SIZE,
   themePreference: "system",
   selectedAlbumIds: [],
 };

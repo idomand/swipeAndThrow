@@ -4,10 +4,15 @@ import { ThemedView } from "@/components/common/themedView";
 import PhotoCard from "@/components/PhotoCard";
 import SwipeLabel from "@/components/SwipeLabel";
 import { Spacing } from "@/constants/theme";
-import { APP_OWNED_MEDIA, KEEP_ALBUM_TITLE } from "@/constants/values";
-import { useUserContext } from "@/contexts/userContext";
+import {
+  APP_OWNED_MEDIA,
+  KEEP_ALBUM_TITLE,
+  PHOTO_BATCH_SIZE,
+} from "@/constants/values";
+import { useUserContext, type UserSettings } from "@/contexts/userContext";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { getFolderName } from "@/helpers/getFolderName";
+import { shuffle } from "@/helpers/shuffle";
 import { useTheme } from "@/hooks/useTheme";
 import {
   Album,
@@ -17,7 +22,7 @@ import {
   Query,
   usePermissions,
 } from "expo-media-library";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
@@ -42,6 +47,14 @@ type DeckItem = { id: string; uri: string };
 // A set of photos that share a source folder, applied as one native call so a
 // folder that rejects the operation can't take the others down with it.
 type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
+
+// The settings that shape a batch, folded into one comparable string. Only
+// these change what the gallery query returns, so the deck is reloaded on
+// returning from Settings when this differs from what the current deck was
+// built with — the theme, for one, doesn't warrant a reload.
+function deckSignature(settings: UserSettings) {
+  return settings.selectedAlbumIds.join(",");
+}
 
 // Fixed overlay badges the swiper fades in as a card is dragged, one per
 // direction. Defined at module scope so their identity is stable.
@@ -97,6 +110,10 @@ export default function HomeScreen() {
   const skippedIdsRef = useRef(skippedIds);
   const cardsRef = useRef(cards);
   const loadingRef = useRef(false);
+  // The settings the current deck was loaded with. Null until the first load
+  // records one, so the focus effect knows there's nothing to compare against
+  // yet and leaves the initial load to run.
+  const loadedSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     decisionsRef.current = decisions;
@@ -155,17 +172,41 @@ export default function HomeScreen() {
     return new Set(reviewed.map((asset) => asset.id));
   }
 
+  // The pool of photos a batch may draw from: lightweight metadata (no uri
+  // resolution) for every image in the selected albums, or the whole library
+  // when none are selected. One query per album — `Query.album` takes a single
+  // album, there's no multi-album filter — merged into one list. Metadata is
+  // enough here; only the photos that make the batch get rebuilt into `Asset`s.
+  async function loadCandidateMetadata() {
+    const albumIds = settings.selectedAlbumIds;
+    if (albumIds.length === 0) {
+      return new Query()
+        .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+        .exeForMetadata();
+    }
+
+    const perAlbum = await Promise.all(
+      albumIds.map((id) =>
+        new Query()
+          .album(new Album(id))
+          .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+          .exeForMetadata(),
+      ),
+    );
+    return perAlbum.flat();
+  }
+
   // Fetches a fresh batch of unreviewed photos from the gallery. Photos already
   // in the keep album, or awaiting a decision in the pending buffer, are
   // excluded so nothing comes up for review twice. Reads the exclusion sets
   // through refs so a call from `onSwipedAll` sees the latest decisions.
+  //
+  // The random draw happens here, over the whole eligible pool, *before* the
+  // batch is sliced off — so a batch is a random sample of the selected albums
+  // rather than their newest N photos.
   async function loadPhotoBatch() {
-    const [batch, reviewedIds] = await Promise.all([
-      new Query()
-        .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-        .orderBy({ key: AssetField.CREATION_TIME, ascending: false })
-        .limit(settings.photoBatchSize)
-        .exe(),
+    const [candidates, reviewedIds] = await Promise.all([
+      loadCandidateMetadata(),
       loadReviewedIds(),
     ]);
 
@@ -173,12 +214,27 @@ export default function HomeScreen() {
       decisionsRef.current.map((decision) => decision.asset.id),
     );
     const skipped = new Set(skippedIdsRef.current);
-    return batch.filter(
-      (asset) =>
-        !reviewedIds.has(asset.id) &&
-        !decidedIds.has(asset.id) &&
-        !skipped.has(asset.id),
-    );
+
+    // Dedupe (an asset can surface in more than one selected album on iOS) and
+    // drop anything already handled, so the random pick is over fresh photos.
+    const seen = new Set<string>();
+    const pool: string[] = [];
+    for (const asset of candidates) {
+      if (
+        seen.has(asset.id) ||
+        reviewedIds.has(asset.id) ||
+        decidedIds.has(asset.id) ||
+        skipped.has(asset.id)
+      ) {
+        continue;
+      }
+      seen.add(asset.id);
+      pool.push(asset.id);
+    }
+
+    return shuffle(pool)
+      .slice(0, PHOTO_BATCH_SIZE)
+      .map((id) => new Asset(id));
   }
 
   // Loads the next deck: pulls a batch, resolves each photo's uri (dropping any
@@ -187,6 +243,9 @@ export default function HomeScreen() {
   const loadBatch = useCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
+    // Record the settings this deck is built with, so a later focus can tell
+    // whether anything that shapes the batch changed while in Settings.
+    loadedSignatureRef.current = deckSignature(settings);
     setLoading(true);
 
     try {
@@ -220,7 +279,7 @@ export default function HomeScreen() {
       loadingRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.photoBatchSize]);
+  }, [settings]);
 
   // Debug helper: dumps the gallery's photo albums to the console. Albums with
   // no images (music, video-only, …) are filtered out — this app is photos only.
@@ -268,6 +327,23 @@ export default function HomeScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reloads the deck on returning from Settings, but only when a setting that
+  // shapes the batch actually changed — so a visit that changed nothing (or
+  // only the theme) leaves the current deck and its place untouched. The very
+  // first focus is skipped: the initial load above owns the first deck, and it
+  // hasn't recorded a signature yet.
+  useFocusEffect(
+    useCallback(() => {
+      const signature = deckSignature(settings);
+      if (
+        loadedSignatureRef.current !== null &&
+        loadedSignatureRef.current !== signature
+      ) {
+        loadBatch();
+      }
+    }, [settings, loadBatch]),
+  );
 
   // Records a keep/throw decision. Nothing touches the gallery here — both
   // kinds only join the pending buffer, so every one of them stays undoable

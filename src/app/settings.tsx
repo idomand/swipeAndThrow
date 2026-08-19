@@ -8,7 +8,6 @@ import { useUserContext, type ThemePreference } from "@/contexts/userContext";
 import { router } from "expo-router";
 import { ScrollView, StyleSheet } from "react-native";
 
-const BATCH_SIZES = [25, 50, 100, 200];
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
 
 // Presented as a full-screen modal from the root Stack — the "Settings" title
@@ -26,14 +25,6 @@ export default function Settings() {
   return (
     <ThemedContainer>
       <ScrollView contentContainerStyle={styles.content}>
-        <OptionSelector
-          label="Photos per batch"
-          hint="How many photos each gallery query pulls at once."
-          options={BATCH_SIZES}
-          selected={settings.photoBatchSize}
-          onSelect={(size) => setSetting("photoBatchSize", size)}
-        />
-
         <OptionSelector
           label="Theme"
           hint="Overrides your device's appearance."

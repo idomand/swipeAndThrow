@@ -49,11 +49,17 @@ callbacks (`advanceWindow`), not just the swiper's `onIndexChange`, which lags.
 
 ### Loading batches
 
-`loadPhotoBatch` queries images newest-first up to `settings.photoBatchSize`,
-then excludes three sets: photos already in the keep album (`loadReviewedIds`,
-which reads the album named by the `KEEP_ALBUM_TITLE` constant in
-`constants/values.ts` — `"SwipeAndThrow"`, hardcoded and no longer user-editable),
-photos already in `decisions`, and `skippedIds`. The keep album thus doubles as
+`loadPhotoBatch` builds the eligible pool as lightweight metadata
+(`loadCandidateMetadata`) — one `Query.album` per selected album, or the whole
+image library when `settings.selectedAlbumIds` is empty — then excludes three
+sets: photos already in the keep album (`loadReviewedIds`, which reads the album
+named by the `KEEP_ALBUM_TITLE` constant in `constants/values.ts` —
+`"SwipeAndThrow"`, hardcoded and no longer user-editable), photos already in
+`decisions`, and `skippedIds`. The surviving pool is **shuffled, then sliced to
+the first `PHOTO_BATCH_SIZE`** (a fixed constant, 20, also no longer
+user-editable) — so the random draw happens across the whole pool before the
+batch is cut, and only the chosen ids are rebuilt into `Asset`s. The keep album
+thus doubles as
 the persistent "already reviewed" marker across restarts.
 
 ### Applying (`handleApplyDecisions`)
