@@ -1,6 +1,7 @@
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
 import { Colors } from "@/constants/theme";
 import { UserProvider } from "@/contexts/userContext";
+import { useDailyReminder } from "@/hooks/useDailyReminder";
 import { useResolvedScheme } from "@/hooks/useTheme";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -21,6 +22,10 @@ export default function RootLayout() {
 function RootNavigator() {
   const scheme = useResolvedScheme();
   const colors = Colors[scheme];
+
+  // Keeps the daily reminder notification in sync with settings on launch —
+  // must live below UserProvider so it can read them.
+  useDailyReminder();
 
   return (
     // Required by react-native-gesture-handler so the swipe deck on the home

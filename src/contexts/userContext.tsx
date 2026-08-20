@@ -10,6 +10,12 @@ export type UserSettings = {
   themePreference: ThemePreference;
   // Album ids the app draws photos from. Empty means every album is fair game.
   selectedAlbumIds: string[];
+  // Opt-in daily reminder notification. Off by default — the app never nags
+  // unless the user asks it to.
+  dailyReminderEnabled: boolean;
+  // When the reminder fires, as a 24-hour "HH:mm" string. Only meaningful when
+  // dailyReminderEnabled is true.
+  dailyReminderTime: string;
 };
 
 // Falls back to the compiled-in constants, so a fresh install behaves exactly
@@ -17,6 +23,8 @@ export type UserSettings = {
 const DEFAULT_SETTINGS: UserSettings = {
   themePreference: "system",
   selectedAlbumIds: [],
+  dailyReminderEnabled: false,
+  dailyReminderTime: "20:00",
 };
 
 // One key holding the whole object rather than a key per setting: a single

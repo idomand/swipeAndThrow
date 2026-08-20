@@ -41,7 +41,9 @@
           "savePhotosPermission": "Allow SwipeAndThrow to save photos to your library.",
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
