@@ -1,4 +1,5 @@
 import ThemedContainer from "@/components/common/themedContainer";
+import { ThemedText } from "@/components/common/themedText";
 import { ThemedView } from "@/components/common/themedView";
 import { OptionSelector } from "@/components/settings/optionSelector";
 import { ReminderTimeRow } from "@/components/settings/reminderTimeRow";
@@ -7,13 +8,14 @@ import { SettingsButton } from "@/components/settings/settingsButton";
 import { SettingToggle } from "@/components/settings/settingToggle";
 import { Spacing } from "@/constants/theme";
 import { useUserContext, type ThemePreference } from "@/contexts/userContext";
+import { useTheme } from "@/hooks/useTheme";
 import {
   cancelDailyReminder,
   ensureNotificationPermission,
   scheduleDailyReminder,
 } from "@/lib/notifications";
 import { router } from "expo-router";
-import { Alert, ScrollView, StyleSheet } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet } from "react-native";
 
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
 
@@ -63,6 +65,8 @@ export default function Settings() {
   return (
     <ThemedContainer>
       <ScrollView contentContainerStyle={styles.content}>
+        <AboutRow onPress={() => router.push("/about")} />
+
         <OptionSelector
           label="Theme"
           hint="Overrides your device's appearance."
@@ -86,15 +90,43 @@ export default function Settings() {
             onTimeChange={changeReminderTime}
           />
         )}
-
-        <ThemedView style={styles.footer}>
+        {/* <ThemedView style={styles.footer}>
           <SettingsButton label="Reset to defaults" onPress={resetSettings} />
-          {isPresented && (
+        </ThemedView> */}
+        {isPresented && (
+          <ThemedView style={styles.footer}>
             <SettingsButton label="Done" onPress={() => router.back()} />
-          )}
-        </ThemedView>
+          </ThemedView>
+        )}
       </ScrollView>
     </ThemedContainer>
+  );
+}
+
+// A prominent, tappable card at the top of Settings that opens the About
+// screen. Made explicit — an icon, a title, a one-line description and a
+// chevron — rather than a plain footer button, so new users notice it.
+function AboutRow({ onPress }: { onPress: () => void }) {
+  const theme = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => pressed && styles.pressed}
+    >
+      <ThemedView type="backgroundElement" style={styles.aboutRow}>
+        <ThemedText style={styles.aboutIcon}>ℹ️</ThemedText>
+        <ThemedView style={styles.aboutText}>
+          <ThemedText type="smallBold">About this app</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            How it works, permissions, and what happens when you apply.
+          </ThemedText>
+        </ThemedView>
+        <ThemedText type="subtitle" style={{ color: theme.textSecondary }}>
+          ›
+        </ThemedText>
+      </ThemedView>
+    </Pressable>
   );
 }
 
@@ -102,6 +134,25 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.five,
     paddingVertical: Spacing.four,
+  },
+  aboutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    borderRadius: Spacing.four,
+  },
+  aboutIcon: {
+    fontSize: 24,
+  },
+  aboutText: {
+    flex: 1,
+    backgroundColor: "transparent",
+    gap: Spacing.half,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   footer: {
     flexDirection: "row",

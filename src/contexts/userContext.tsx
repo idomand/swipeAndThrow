@@ -16,6 +16,9 @@ export type UserSettings = {
   // When the reminder fires, as a 24-hour "HH:mm" string. Only meaningful when
   // dailyReminderEnabled is true.
   dailyReminderTime: string;
+  // True once the first-run About screen has auto-opened; keeps it from
+  // reappearing on later launches.
+  hasSeenInfo: boolean;
 };
 
 // Falls back to the compiled-in constants, so a fresh install behaves exactly
@@ -25,6 +28,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   selectedAlbumIds: [],
   dailyReminderEnabled: false,
   dailyReminderTime: "20:00",
+  hasSeenInfo: false,
 };
 
 // One key holding the whole object rather than a key per setting: a single

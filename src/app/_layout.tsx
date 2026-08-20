@@ -46,6 +46,12 @@ function RootNavigator() {
             name="settings"
             options={{ presentation: "fullScreenModal", title: "Settings" }}
           />
+          {/* Reached from Settings and auto-opened once on first launch. Full
+              screen so the info sections get the whole viewport. */}
+          <Stack.Screen
+            name="about"
+            options={{ presentation: "fullScreenModal", title: "About" }}
+          />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>
