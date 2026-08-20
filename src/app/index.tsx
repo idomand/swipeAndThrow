@@ -12,7 +12,7 @@ import {
 import { useUserContext, type UserSettings } from "@/contexts/userContext";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { getFolderName } from "@/helpers/getFolderName";
-import { shuffle } from "@/helpers/shuffle";
+import { sample } from "@/helpers/sample";
 import { useTheme } from "@/hooks/useTheme";
 import {
   Album,
@@ -115,6 +115,19 @@ export default function HomeScreen() {
   // yet and leaves the initial load to run.
   const loadedSignatureRef = useRef<string | null>(null);
 
+  // Session caches for the two expensive gallery scans, so a new batch every 20
+  // swipes doesn't re-scan the whole library. The candidate pool is the deduped
+  // eligible ids tagged with the `deckSignature` it was built for — a signature
+  // mismatch (the user changed album selection) invalidates it. `reviewedIds`
+  // is the keep album's contents. Both are cleared after a successful apply,
+  // when photos are actually deleted/moved and the scans would be stale.
+  // Fresh photos taken or deleted *outside* the app mid-session won't show up
+  // until then; that matches the app's session model.
+  const candidatePoolRef = useRef<{ signature: string; ids: string[] } | null>(
+    null,
+  );
+  const reviewedIdsRef = useRef<Set<string> | null>(null);
+
   useEffect(() => {
     decisionsRef.current = decisions;
     skippedIdsRef.current = skippedIds;
@@ -159,41 +172,71 @@ export default function HomeScreen() {
   }
 
   // Ids of the photos already sorted into the keep album, so they never come
-  // back around for a second review.
+  // back around for a second review. Cached for the session — the keep album
+  // only changes when we apply a batch, which clears the cache.
   async function loadReviewedIds() {
+    if (reviewedIdsRef.current) return reviewedIdsRef.current;
+
     const keepAlbum = await Album.get(KEEP_ALBUM_TITLE);
-    if (!keepAlbum) return new Set<string>();
+    if (!keepAlbum) {
+      const empty = new Set<string>();
+      reviewedIdsRef.current = empty;
+      return empty;
+    }
 
     const reviewed = await new Query()
       .album(keepAlbum)
       .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
       .exeForMetadata();
 
-    return new Set(reviewed.map((asset) => asset.id));
+    const ids = new Set(reviewed.map((asset) => asset.id));
+    reviewedIdsRef.current = ids;
+    return ids;
   }
 
-  // The pool of photos a batch may draw from: lightweight metadata (no uri
+  // The deduped pool of ids a batch may draw from: lightweight metadata (no uri
   // resolution) for every image in the selected albums, or the whole library
   // when none are selected. One query per album — `Query.album` takes a single
-  // album, there's no multi-album filter — merged into one list. Metadata is
-  // enough here; only the photos that make the batch get rebuilt into `Asset`s.
-  async function loadCandidateMetadata() {
+  // album, there's no multi-album filter — merged and deduped (an asset can
+  // surface in more than one selected album on iOS). Metadata is enough here;
+  // only the photos that make the batch get rebuilt into `Asset`s.
+  //
+  // Cached for the session, keyed by the album selection: a new batch every 20
+  // swipes reuses the scan instead of walking the whole library again. The
+  // reviewed/decided/skipped exclusions are applied fresh per batch by the
+  // caller, so caching the raw candidate ids stays correct.
+  async function loadCandidatePool() {
+    const signature = deckSignature(settings);
+    const cached = candidatePoolRef.current;
+    if (cached && cached.signature === signature) return cached.ids;
+
     const albumIds = settings.selectedAlbumIds;
-    if (albumIds.length === 0) {
-      return new Query()
-        .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-        .exeForMetadata();
+    const metadata =
+      albumIds.length === 0
+        ? await new Query()
+            .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+            .exeForMetadata()
+        : (
+            await Promise.all(
+              albumIds.map((id) =>
+                new Query()
+                  .album(new Album(id))
+                  .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
+                  .exeForMetadata(),
+              ),
+            )
+          ).flat();
+
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const asset of metadata) {
+      if (seen.has(asset.id)) continue;
+      seen.add(asset.id);
+      ids.push(asset.id);
     }
 
-    const perAlbum = await Promise.all(
-      albumIds.map((id) =>
-        new Query()
-          .album(new Album(id))
-          .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-          .exeForMetadata(),
-      ),
-    );
-    return perAlbum.flat();
+    candidatePoolRef.current = { signature, ids };
+    return ids;
   }
 
   // Fetches a fresh batch of unreviewed photos from the gallery. Photos already
@@ -205,8 +248,8 @@ export default function HomeScreen() {
   // batch is sliced off — so a batch is a random sample of the selected albums
   // rather than their newest N photos.
   async function loadPhotoBatch() {
-    const [candidates, reviewedIds] = await Promise.all([
-      loadCandidateMetadata(),
+    const [candidateIds, reviewedIds] = await Promise.all([
+      loadCandidatePool(),
       loadReviewedIds(),
     ]);
 
@@ -215,26 +258,14 @@ export default function HomeScreen() {
     );
     const skipped = new Set(skippedIdsRef.current);
 
-    // Dedupe (an asset can surface in more than one selected album on iOS) and
-    // drop anything already handled, so the random pick is over fresh photos.
-    const seen = new Set<string>();
-    const pool: string[] = [];
-    for (const asset of candidates) {
-      if (
-        seen.has(asset.id) ||
-        reviewedIds.has(asset.id) ||
-        decidedIds.has(asset.id) ||
-        skipped.has(asset.id)
-      ) {
-        continue;
-      }
-      seen.add(asset.id);
-      pool.push(asset.id);
-    }
+    // Drop anything already handled, so the random pick is over fresh photos.
+    // The candidate ids are already deduped by `loadCandidatePool`.
+    const pool = candidateIds.filter(
+      (id) =>
+        !reviewedIds.has(id) && !decidedIds.has(id) && !skipped.has(id),
+    );
 
-    return shuffle(pool)
-      .slice(0, PHOTO_BATCH_SIZE)
-      .map((id) => new Asset(id));
+    return sample(pool, PHOTO_BATCH_SIZE).map((id) => new Asset(id));
   }
 
   // Loads the next deck: pulls a batch, resolves each photo's uri (dropping any
@@ -253,8 +284,10 @@ export default function HomeScreen() {
       const resolved = await Promise.all(
         batch.map(async (asset) => {
           try {
-            const info = await asset.getInfo();
-            return { asset, uri: info.uri } as PhotoCardData;
+            // Only the uri is needed to display the card; `getUri` resolves
+            // just that, without the full `getInfo` (dimensions, filename, …).
+            const uri = await asset.getUri();
+            return { asset, uri } as PhotoCardData;
           } catch {
             return null;
           }
@@ -281,36 +314,6 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
-  // Debug helper: dumps the gallery's photo albums to the console. Albums with
-  // no images (music, video-only, …) are filtered out — this app is photos only.
-  async function logAlbums() {
-    try {
-      const albums = await Album.getAll();
-      const entries = await Promise.all(
-        albums.map(async (album) => {
-          const photos = await new Query()
-            .album(album)
-            .eq(AssetField.MEDIA_TYPE, MediaType.IMAGE)
-            .exe();
-
-          return {
-            title: await album.getTitle(),
-            photoCount: photos.length,
-            // Where the album actually sits on disk, read off its first photo
-            // (`getUri` returns a real file:// path). This is what decides
-            // whether an album shows up next to the others in the gallery.
-            folder: photos[0] ? getFolderName(await photos[0].getUri()) : "—",
-          };
-        }),
-      );
-
-      const photoAlbums = entries.filter((entry) => entry.photoCount > 0);
-      console.log(`Photo albums (${photoAlbums.length}):`, photoAlbums);
-    } catch (error) {
-      console.log("Couldn't read albums", error);
-    }
-  }
-
   // Loads the first batch as soon as the app opens, so there's a deck waiting
   // instead of an empty screen. Runs once — the permission prompt is part of it.
   useEffect(() => {
@@ -318,7 +321,6 @@ export default function HomeScreen() {
 
     (async () => {
       if (!(await checkPermission()) || !active) return;
-      await logAlbums();
       if (active) await loadBatch();
     })();
 
@@ -448,10 +450,15 @@ export default function HomeScreen() {
   // Splits the kept photos by source folder. Each group becomes its own native
   // call, so a folder that refuses the operation only fails its own photos.
   async function groupKeepsByFolder(assetsToKeep: Asset[]) {
-    const groups = new Map<string, KeepGroup>();
+    // Resolve every source uri up front so the native round-trips overlap
+    // instead of running one at a time; the grouping itself is synchronous.
+    const uris = await Promise.all(
+      assetsToKeep.map((asset) => asset.getUri()),
+    );
 
-    for (const asset of assetsToKeep) {
-      const folder = getFolderName(await asset.getUri());
+    const groups = new Map<string, KeepGroup>();
+    assetsToKeep.forEach((asset, index) => {
+      const folder = getFolderName(uris[index]);
       const group = groups.get(folder);
       if (group) {
         group.assets.push(asset);
@@ -462,7 +469,7 @@ export default function HomeScreen() {
           appOwned: APP_OWNED_MEDIA.test(folder),
         });
       }
-    }
+    });
 
     return [...groups.values()];
   }
@@ -582,6 +589,13 @@ export default function HomeScreen() {
     setDecisions((prev) =>
       prev.filter((decision) => !applied.has(decision.asset.id)),
     );
+    // The gallery just changed under the caches: thrown photos are deleted and
+    // kept ones moved into the keep album. Drop both so the next batch re-scans
+    // and doesn't re-surface a now-deleted id or an already-kept photo.
+    if (applied.size > 0) {
+      candidatePoolRef.current = null;
+      reviewedIdsRef.current = null;
+    }
     // Applied swipes are committed to the gallery now, so a spring-back would
     // no longer map to the buffer — drop the deck's undo history.
     setHistory([]);
