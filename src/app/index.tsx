@@ -4,16 +4,23 @@ import { ThemedView } from "@/components/common/themedView";
 import PhotoCard from "@/components/PhotoCard";
 import SwipeLabel from "@/components/SwipeLabel";
 import { Spacing } from "@/constants/theme";
-import {
-  APP_OWNED_MEDIA,
-  KEEP_ALBUM_TITLE,
-  PHOTO_BATCH_SIZE,
-} from "@/constants/values";
+import { KEEP_ALBUM_TITLE, PHOTO_BATCH_SIZE } from "@/constants/values";
 import { useUserContext, type UserSettings } from "@/contexts/userContext";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
-import { getFolderName } from "@/helpers/getFolderName";
 import { sample } from "@/helpers/sample";
 import { useTheme } from "@/hooks/useTheme";
+import {
+  applyDecision,
+  applySkip,
+  applyUndo,
+  clearApplied,
+  emptyBuffer,
+  resetHistory,
+  selectPendingDelete,
+  selectPendingKeep,
+  type BufferState,
+} from "@/lib/decisionBuffer";
+import { groupByFolder, type KeepGroup } from "@/lib/groupKeeps";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
   Album,
@@ -29,12 +36,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet } from "react-native";
 import { Swiper, type SwiperCardRefType } from "rn-swiper-list";
 
-type Decision = { action: "keep" | "throw"; asset: Asset };
-
-// One swipe made this session, newest last. Used only to reverse the last one:
-// "keep"/"throw" pop from `decisions`, "skip" pops from `skippedIds`.
-type SwipeAction = "keep" | "throw" | "skip";
-
 // A photo in the deck, with its uri resolved up front so the whole card stack
 // can render at once — the swiper needs every card ready, not one at a time.
 type PhotoCardData = { asset: Asset; uri: string };
@@ -44,10 +45,6 @@ type PhotoCardData = { asset: Asset; uri: string };
 // ("Cannot copy value of type Asset"), so the asset itself never goes in —
 // the swipe callbacks look it up by deck position through `cardsRef` instead.
 type DeckItem = { id: string; uri: string };
-
-// A set of photos that share a source folder, applied as one native call so a
-// folder that rejects the operation can't take the others down with it.
-type KeepGroup = { folder: string; assets: Asset[]; appOwned: boolean };
 
 // The settings that shape a batch, folded into one comparable string. Only
 // these change what the gallery query returns, so the deck is reloaded on
@@ -102,19 +99,15 @@ export default function HomeScreen() {
   // True while the buffered decisions are being applied to the gallery. Every
   // swipe and button is locked so a slow move/delete can't be fired twice.
   const [applying, setApplying] = useState(false);
-  // Every decision the user has made, in order. Nothing has touched the
-  // gallery yet — photos stay in their original folders until the user applies
-  // the batch, so any decision can be undone up to that point. Keeping the
-  // decisions in one ordered list is what lets a single Undo reverse the last
-  // one whichever kind it was.
-  const [decisions, setDecisions] = useState<Decision[]>([]);
-  // Photos skipped this session. They keep their place in the gallery — the
-  // ids only stop them coming back around before the app is restarted.
-  const [skippedIds, setSkippedIds] = useState<string[]>([]);
-  // Swipes made in the current deck, so Undo knows what the last one was and
-  // which buffer to pop. Reset per batch (and on apply): the swiper can only
-  // spring a card back within the deck that's still on screen.
-  const [history, setHistory] = useState<SwipeAction[]>([]);
+  // The whole decision buffer in one place: the ordered decisions, the ids of
+  // photos skipped this session, and the current deck's swipe history. Nothing
+  // has touched the gallery yet — photos stay in their original folders until
+  // the user applies the batch, so any decision stays undoable up to that
+  // point, and the single ordered history is what lets one Undo reverse the
+  // last swipe whichever kind it was. The transitions live in
+  // `@/lib/decisionBuffer` so they can be unit tested; here they drive state.
+  const [buffer, setBuffer] = useState<BufferState<Asset>>(emptyBuffer);
+  const { decisions, skippedIds, history } = buffer;
 
   // Imperative handle on the deck so the Keep/Throw/Skip buttons drive the same
   // swipes as the gestures, and Undo can spring the last card back.
@@ -159,12 +152,8 @@ export default function HomeScreen() {
     [cards],
   );
 
-  const pendingKeep = decisions
-    .filter((decision) => decision.action === "keep")
-    .map((decision) => decision.asset);
-  const pendingDelete = decisions
-    .filter((decision) => decision.action === "throw")
-    .map((decision) => decision.asset);
+  const pendingKeep = selectPendingKeep(decisions);
+  const pendingDelete = selectPendingDelete(decisions);
 
   const hasDeck = cards.length > 0;
   const hasCard = hasDeck && activeCardIndex < cards.length;
@@ -314,7 +303,7 @@ export default function HomeScreen() {
 
       setCards(next);
       setActiveCardIndex(0);
-      setHistory([]);
+      setBuffer((prev) => resetHistory(prev));
       setBatchKey((key) => key + 1);
 
       if (next.length === 0) {
@@ -367,8 +356,7 @@ export default function HomeScreen() {
   // until the batch is applied.
   const recordDecision = useCallback(
     (action: "keep" | "throw", asset: Asset) => {
-      setDecisions((prev) => [...prev, { action, asset }]);
-      setHistory((prev) => [...prev, action]);
+      setBuffer((prev) => applyDecision(prev, action, asset));
     },
     [],
   );
@@ -376,8 +364,7 @@ export default function HomeScreen() {
   // Records a skip. The photo is left exactly where it is; the id just stops it
   // coming up again this session.
   const recordSkip = useCallback((asset: Asset) => {
-    setSkippedIds((prev) => [...prev, asset.id]);
-    setHistory((prev) => [...prev, "skip"]);
+    setBuffer((prev) => applySkip(prev, asset));
   }, []);
 
   // Swipe callbacks. `index` is the card's position in the deck; `cardsRef`
@@ -451,14 +438,7 @@ export default function HomeScreen() {
   // swiper can't restore a card from a batch it has already replaced.
   function handleUndo() {
     if (!canUndo) return;
-    const last = history[history.length - 1];
-
-    setHistory((prev) => prev.slice(0, -1));
-    if (last === "skip") {
-      setSkippedIds((prev) => prev.slice(0, -1));
-    } else {
-      setDecisions((prev) => prev.slice(0, -1));
-    }
+    setBuffer((prev) => applyUndo(prev));
     swiperRef.current?.swipeBack();
   }
 
@@ -466,32 +446,15 @@ export default function HomeScreen() {
   // call, so a folder that refuses the operation only fails its own photos.
   async function groupKeepsByFolder(assetsToKeep: Asset[]) {
     // Resolve every source uri up front so the native round-trips overlap
-    // instead of running one at a time; the grouping itself is synchronous.
-    const uris = await Promise.all(
-      assetsToKeep.map((asset) => asset.getUri()),
-    );
-
-    const groups = new Map<string, KeepGroup>();
-    assetsToKeep.forEach((asset, index) => {
-      const folder = getFolderName(uris[index]);
-      const group = groups.get(folder);
-      if (group) {
-        group.assets.push(asset);
-      } else {
-        groups.set(folder, {
-          folder,
-          assets: [asset],
-          appOwned: APP_OWNED_MEDIA.test(folder),
-        });
-      }
-    });
-
-    return [...groups.values()];
+    // instead of running one at a time; the grouping itself is synchronous and
+    // lives in `@/lib/groupKeeps` so it can be unit tested without the library.
+    const uris = await Promise.all(assetsToKeep.map((asset) => asset.getUri()));
+    return groupByFolder(assetsToKeep, uris);
   }
 
   // Applies one folder's worth of keeps. Returns a warning when the photos
   // landed in the album but something non-fatal was left behind.
-  async function applyKeepGroup(group: KeepGroup) {
+  async function applyKeepGroup(group: KeepGroup<Asset>) {
     if (group.appOwned) {
       // Ownership can't move out of another app's media directory, so copy
       // into the album (`moveAssets: false`) and delete the originals. The copy
@@ -609,10 +572,10 @@ export default function HomeScreen() {
       }
     }
 
-    // Clear only what actually went through.
-    setDecisions((prev) =>
-      prev.filter((decision) => !applied.has(decision.asset.id)),
-    );
+    // Clear only what actually went through, and drop the deck's undo history:
+    // applied swipes are committed to the gallery now, so a spring-back would no
+    // longer map to the buffer. Decisions that failed stay buffered for a retry.
+    setBuffer((prev) => clearApplied(prev, applied));
     // The gallery just changed under the caches: thrown photos are deleted and
     // kept ones moved into the keep album. Drop both so the next batch re-scans
     // and doesn't re-surface a now-deleted id or an already-kept photo.
@@ -620,9 +583,6 @@ export default function HomeScreen() {
       candidatePoolRef.current = null;
       reviewedIdsRef.current = null;
     }
-    // Applied swipes are committed to the gallery now, so a spring-back would
-    // no longer map to the buffer — drop the deck's undo history.
-    setHistory([]);
     setApplying(false);
 
     // Nothing is shown on success — the system dialogs already confirmed it.
