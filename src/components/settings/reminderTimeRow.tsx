@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/useTranslation";
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
@@ -31,6 +32,7 @@ export function ReminderTimeRow({
   time: string;
   onTimeChange: (time: string) => void;
 }) {
+  const { t } = useTranslation();
   const [show, setShow] = useState(false);
 
   function handleChange(event: DateTimePickerEvent, date?: Date) {
@@ -43,7 +45,10 @@ export function ReminderTimeRow({
   }
 
   return (
-    <SettingRow label="Reminder time" hint="When the daily reminder is sent.">
+    <SettingRow
+      label={t("settings.reminderTimeLabel")}
+      hint={t("settings.reminderTimeHint")}
+    >
       <SettingsButton label={time} onPress={() => setShow(true)} />
 
       {show && (

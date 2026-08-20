@@ -3,6 +3,7 @@ import { Colors } from "@/constants/theme";
 import { UserProvider } from "@/contexts/userContext";
 import { useDailyReminder } from "@/hooks/useDailyReminder";
 import { useResolvedScheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -22,6 +23,7 @@ export default function RootLayout() {
 function RootNavigator() {
   const scheme = useResolvedScheme();
   const colors = Colors[scheme];
+  const { t } = useTranslation();
 
   // Keeps the daily reminder notification in sync with settings on launch —
   // must live below UserProvider so it can read them.
@@ -44,13 +46,16 @@ function RootNavigator() {
               than a sheet so the settings list gets the whole viewport. */}
           <Stack.Screen
             name="settings"
-            options={{ presentation: "fullScreenModal", title: "Settings" }}
+            options={{
+              presentation: "fullScreenModal",
+              title: t("nav.settings"),
+            }}
           />
           {/* Reached from Settings and auto-opened once on first launch. Full
               screen so the info sections get the whole viewport. */}
           <Stack.Screen
             name="about"
-            options={{ presentation: "fullScreenModal", title: "About" }}
+            options={{ presentation: "fullScreenModal", title: t("nav.about") }}
           />
         </Stack>
       </ThemeProvider>

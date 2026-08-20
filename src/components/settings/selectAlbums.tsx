@@ -3,6 +3,7 @@ import { ThemedView } from "@/components/common/themedView";
 import { Spacing } from "@/constants/theme";
 import { useUserContext } from "@/contexts/userContext";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   Album,
   AssetField,
@@ -30,6 +31,7 @@ type AlbumEntry = { id: string; title: string; photoCount: number };
 // updated on "Done". Empty selection means "all albums".
 export function SelectAlbums() {
   const { settings, setSetting } = useUserContext();
+  const { t } = useTranslation();
   const [permission, requestPermission] = usePermissions();
 
   const [open, setOpen] = useState(false);
@@ -100,12 +102,9 @@ export function SelectAlbums() {
   const count = settings.selectedAlbumIds.length;
 
   return (
-    <SettingRow
-      label="Albums"
-      hint="Which albums photos are drawn from. Choose none to include them all."
-    >
+    <SettingRow label={t("albums.label")} hint={t("albums.hint")}>
       <SettingsButton
-        label={count === 0 ? "All albums" : `${count} selected`}
+        label={count === 0 ? t("albums.all") : t("albums.selected", { n: count })}
         onPress={openModal}
       />
 
@@ -116,7 +115,7 @@ export function SelectAlbums() {
         onRequestClose={() => setOpen(false)}
       >
         <ThemedContainerModal>
-          <ThemedText type="subtitle">Select albums</ThemedText>
+          <ThemedText type="subtitle">{t("albums.modalTitle")}</ThemedText>
 
           {loading ? (
             <ActivityIndicator style={styles.loading} />
@@ -124,7 +123,7 @@ export function SelectAlbums() {
             <ScrollView contentContainerStyle={styles.list}>
               {albums.length === 0 ? (
                 <ThemedText type="small" themeColor="textSecondary">
-                  No albums with photos were found.
+                  {t("albums.empty")}
                 </ThemedText>
               ) : (
                 albums.map((album) => (
@@ -140,8 +139,11 @@ export function SelectAlbums() {
           )}
 
           <ThemedView style={styles.footer}>
-            <SettingsButton label="Cancel" onPress={() => setOpen(false)} />
-            <SettingsButton label="Done" onPress={save} />
+            <SettingsButton
+              label={t("albums.cancel")}
+              onPress={() => setOpen(false)}
+            />
+            <SettingsButton label={t("albums.done")} onPress={save} />
           </ThemedView>
         </ThemedContainerModal>
       </Modal>
@@ -159,6 +161,8 @@ function AlbumRow({
   selected: boolean;
   onPress: () => void;
 }) {
+  const { tp } = useTranslation();
+
   return (
     <Pressable
       onPress={onPress}
@@ -173,7 +177,7 @@ function AlbumRow({
             {album.title}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {album.photoCount} photo{album.photoCount === 1 ? "" : "s"}
+            {tp("albums.photoCount", album.photoCount)}
           </ThemedText>
         </ThemedView>
         {selected && <ThemedText type="smallBold">✓</ThemedText>}

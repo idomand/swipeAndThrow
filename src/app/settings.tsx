@@ -7,8 +7,13 @@ import { SelectAlbums } from "@/components/settings/selectAlbums";
 import { SettingsButton } from "@/components/settings/settingsButton";
 import { SettingToggle } from "@/components/settings/settingToggle";
 import { Spacing } from "@/constants/theme";
-import { useUserContext, type ThemePreference } from "@/contexts/userContext";
+import {
+  useUserContext,
+  type Language,
+  type ThemePreference,
+} from "@/contexts/userContext";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   cancelDailyReminder,
   ensureNotificationPermission,
@@ -18,11 +23,20 @@ import { router } from "expo-router";
 import { Alert, Pressable, ScrollView, StyleSheet } from "react-native";
 
 const THEMES: ThemePreference[] = ["system", "light", "dark"];
+const LANGUAGES: Language[] = ["en", "de"];
+
+// Language pills read in their own language, so they aren't run through the
+// translator.
+const LANGUAGE_LABELS: Record<Language, string> = {
+  en: "English",
+  de: "Deutsch",
+};
 
 // Presented as a full-screen modal from the root Stack — the "Settings" title
 // comes from the route options there, not from this screen.
 export default function Settings() {
-  const { settings, setSetting, resetSettings, loaded } = useUserContext();
+  const { settings, setSetting, loaded } = useUserContext();
+  const { t } = useTranslation();
   // False when the modal is deep-linked into directly, where there's nothing
   // to go back to.
   const isPresented = router.canGoBack();
@@ -39,22 +53,19 @@ export default function Settings() {
 
     const granted = await ensureNotificationPermission();
     if (!granted) {
-      Alert.alert(
-        "Notifications are off",
-        "Enable notifications for SwipeAndThrow in your device settings to get a daily reminder.",
-      );
+      Alert.alert(t("settings.notifOffTitle"), t("settings.notifOffBody"));
       return;
     }
 
     await setSetting("dailyReminderEnabled", true);
-    await scheduleDailyReminder(settings.dailyReminderTime);
+    await scheduleDailyReminder(settings.dailyReminderTime, settings.language);
   }
 
   // Persist the new time and, if the reminder is live, reschedule it to match.
   async function changeReminderTime(time: string) {
     await setSetting("dailyReminderTime", time);
     if (settings.dailyReminderEnabled) {
-      await scheduleDailyReminder(time);
+      await scheduleDailyReminder(time, settings.language);
     }
   }
 
@@ -68,18 +79,28 @@ export default function Settings() {
         <AboutRow onPress={() => router.push("/about")} />
 
         <OptionSelector
-          label="Theme"
-          hint="Overrides your device's appearance."
+          label={t("settings.themeLabel")}
+          hint={t("settings.themeHint")}
           options={THEMES}
           selected={settings.themePreference}
           onSelect={(preference) => setSetting("themePreference", preference)}
+          renderLabel={(preference) => t(`settings.themeOption.${preference}`)}
+        />
+
+        <OptionSelector
+          label={t("settings.languageLabel")}
+          hint={t("settings.languageHint")}
+          options={LANGUAGES}
+          selected={settings.language}
+          onSelect={(language) => setSetting("language", language)}
+          renderLabel={(language) => LANGUAGE_LABELS[language]}
         />
 
         <SelectAlbums />
 
         <SettingToggle
-          label="Daily reminder"
-          hint="Get a daily notification to review and clean up your photos."
+          label={t("settings.reminderLabel")}
+          hint={t("settings.reminderHint")}
           value={settings.dailyReminderEnabled}
           onValueChange={toggleReminder}
         />
@@ -90,12 +111,12 @@ export default function Settings() {
             onTimeChange={changeReminderTime}
           />
         )}
-        {/* <ThemedView style={styles.footer}>
-          <SettingsButton label="Reset to defaults" onPress={resetSettings} />
-        </ThemedView> */}
         {isPresented && (
           <ThemedView style={styles.footer}>
-            <SettingsButton label="Done" onPress={() => router.back()} />
+            <SettingsButton
+              label={t("settings.done")}
+              onPress={() => router.back()}
+            />
           </ThemedView>
         )}
       </ScrollView>
@@ -108,6 +129,7 @@ export default function Settings() {
 // chevron — rather than a plain footer button, so new users notice it.
 function AboutRow({ onPress }: { onPress: () => void }) {
   const theme = useTheme();
+  const { t } = useTranslation();
 
   return (
     <Pressable
@@ -117,9 +139,9 @@ function AboutRow({ onPress }: { onPress: () => void }) {
       <ThemedView type="backgroundElement" style={styles.aboutRow}>
         <ThemedText style={styles.aboutIcon}>ℹ️</ThemedText>
         <ThemedView style={styles.aboutText}>
-          <ThemedText type="smallBold">About this app</ThemedText>
+          <ThemedText type="smallBold">{t("settings.aboutTitle")}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            How it works, permissions, and what happens when you apply.
+            {t("settings.aboutDesc")}
           </ThemedText>
         </ThemedView>
         <ThemedText type="subtitle" style={{ color: theme.textSecondary }}>

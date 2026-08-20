@@ -13,10 +13,11 @@ import { useEffect } from "react";
 export function useDailyReminder() {
   const { settings, loaded } = useUserContext();
 
-  // Configure the handler and Android channel once, before anything schedules.
+  // Configure the handler and Android channel before anything schedules. Re-runs
+  // on a language change so the channel name follows the chosen language.
   useEffect(() => {
-    configureNotifications();
-  }, []);
+    configureNotifications(settings.language);
+  }, [settings.language]);
 
   useEffect(() => {
     // Wait for stored settings so we don't reconcile against the defaults and
@@ -24,9 +25,15 @@ export function useDailyReminder() {
     if (!loaded) return;
 
     if (settings.dailyReminderEnabled) {
-      scheduleDailyReminder(settings.dailyReminderTime);
+      scheduleDailyReminder(settings.dailyReminderTime, settings.language);
     } else {
       cancelDailyReminder();
     }
-  }, [loaded, settings.dailyReminderEnabled, settings.dailyReminderTime]);
+    // Language is included so switching it re-bakes the reminder's text.
+  }, [
+    loaded,
+    settings.dailyReminderEnabled,
+    settings.dailyReminderTime,
+    settings.language,
+  ]);
 }

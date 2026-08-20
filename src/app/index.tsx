@@ -14,6 +14,7 @@ import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { getFolderName } from "@/helpers/getFolderName";
 import { sample } from "@/helpers/sample";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   Album,
   Asset,
@@ -59,17 +60,21 @@ function deckSignature(settings: UserSettings) {
 // Fixed overlay badges the swiper fades in as a card is dragged, one per
 // direction. Defined at module scope so their identity is stable.
 function KeepLabel() {
-  return <SwipeLabel text="Keep" color="#34c759" align="right" />;
+  const { t } = useTranslation();
+  return <SwipeLabel text={t("home.keep")} color="#34c759" align="right" />;
 }
 function ThrowLabel() {
-  return <SwipeLabel text="Throw" color="#ff3b30" align="left" />;
+  const { t } = useTranslation();
+  return <SwipeLabel text={t("home.throw")} color="#ff3b30" align="left" />;
 }
 function SkipLabel() {
-  return <SwipeLabel text="Skip" color="#8e8e93" align="center" />;
+  const { t } = useTranslation();
+  return <SwipeLabel text={t("home.skip")} color="#8e8e93" align="center" />;
 }
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const { t, tp } = useTranslation();
   const { settings, setSetting, loaded } = useUserContext();
   const [permission, requestPermission] = usePermissions();
 
@@ -175,10 +180,7 @@ export default function HomeScreen() {
       response = await requestPermission();
     }
     if (!response.granted) {
-      Alert.alert(
-        "Permission needed",
-        "SwipeAndThrow needs access to your photos to help you clean them up.",
-      );
+      Alert.alert(t("alert.permissionTitle"), t("alert.permissionBody"));
       return false;
     }
     return true;
@@ -316,10 +318,10 @@ export default function HomeScreen() {
       setBatchKey((key) => key + 1);
 
       if (next.length === 0) {
-        Alert.alert("All caught up", "No photos left to review.");
+        Alert.alert(t("alert.allCaughtUpTitle"), t("alert.allCaughtUpBody"));
       }
     } catch {
-      Alert.alert("Something went wrong", "Couldn't load your photos.");
+      Alert.alert(t("alert.loadFailTitle"), t("alert.loadFailBody"));
     } finally {
       setLoading(false);
       loadingRef.current = false;
@@ -503,7 +505,9 @@ export default function HomeScreen() {
         // The photos are safely in the album; only the originals remain.
         // Retrying would copy them a second time, so treat this as done and
         // tell the user what's left over.
-        return `${group.assets.length} photo(s) from ${group.folder} were copied to the album, but their originals couldn't be removed — you may see duplicates.`;
+        return tp("apply.copyWarning", group.assets.length, {
+          folder: group.folder,
+        });
       }
 
       return null;
@@ -573,7 +577,11 @@ export default function HomeScreen() {
           } catch (error) {
             console.log(`keep failed for ${group.folder}`, error);
             failures.push(
-              `Keeping ${group.assets.length} from ${group.folder}: ${getErrorMessage(error)}`,
+              t("apply.keepFail", {
+                n: group.assets.length,
+                folder: group.folder,
+                error: getErrorMessage(error),
+              }),
             );
           }
         }
@@ -581,7 +589,7 @@ export default function HomeScreen() {
         if (kept > 0) await verifyKeepAlbum();
       } catch (error) {
         console.log("keep phase failed", error);
-        failures.push(`Keeping photos: ${getErrorMessage(error)}`);
+        failures.push(t("apply.keepPhaseFail", { error: getErrorMessage(error) }));
       }
     }
 
@@ -593,7 +601,10 @@ export default function HomeScreen() {
       } catch (error) {
         console.log("throw batch failed", error);
         failures.push(
-          `Throwing ${pendingDelete.length}: ${getErrorMessage(error)}`,
+          t("apply.throwFail", {
+            n: pendingDelete.length,
+            error: getErrorMessage(error),
+          }),
         );
       }
     }
@@ -620,9 +631,9 @@ export default function HomeScreen() {
     if (notes.length > 0) {
       Alert.alert(
         failures.length > 0
-          ? "Some photos weren't handled"
-          : "Done, with notes",
-        `${notes.join("\n\n")}${failures.length > 0 ? "\n\nThose photos are untouched and still pending." : ""}`,
+          ? t("apply.someFailedTitle")
+          : t("apply.doneWithNotesTitle"),
+        `${notes.join("\n\n")}${failures.length > 0 ? `\n\n${t("apply.stillPending")}` : ""}`,
       );
       return;
     }
@@ -674,7 +685,7 @@ export default function HomeScreen() {
           ) : (
             <ThemedView type="backgroundElement" style={styles.placeholder}>
               <ThemedText type="small" themeColor="textSecondary">
-                {loading ? "Loading…" : "No photos to review"}
+                {loading ? t("home.loading") : t("home.noPhotos")}
               </ThemedText>
               {!loading && (
                 <Pressable
@@ -685,7 +696,7 @@ export default function HomeScreen() {
                     type="backgroundSelected"
                     style={styles.skipButton}
                   >
-                    <ThemedText type="small">Check again</ThemedText>
+                    <ThemedText type="small">{t("home.checkAgain")}</ThemedText>
                   </ThemedView>
                 </Pressable>
               )}
@@ -694,7 +705,7 @@ export default function HomeScreen() {
         </ThemedView>
 
         <ThemedText type="small" themeColor="textSecondary">
-          {hasCard ? `${remaining} left` : ""}
+          {hasCard ? t("home.remaining", { n: remaining }) : ""}
         </ThemedText>
 
         <ThemedView style={styles.decisionRow}>
@@ -712,34 +723,12 @@ export default function HomeScreen() {
                 name={{ ios: "trash", android: "delete", web: "delete" }}
                 size={18}
               />
-              <ThemedText type="smallBold">Throw</ThemedText>
+              <ThemedText type="smallBold">{t("home.throw")}</ThemedText>
               {pendingDelete.length > 0 && (
                 <ThemedText type="small" themeColor="textSecondary">
                   +{pendingDelete.length}
                 </ThemedText>
               )}
-            </ThemedView>
-          </Pressable>
-
-          <Pressable
-            onPress={handleSkip}
-            disabled={!canSwipe}
-            style={({ pressed }) => [
-              styles.decisionPressable,
-              (pressed || !canSwipe) && styles.pressed,
-            ]}
-          >
-            <ThemedView type="backgroundSelected" style={styles.decisionButton}>
-              <SymbolView
-                tintColor={theme.text}
-                name={{
-                  ios: "arrow.up",
-                  android: "arrow_upward",
-                  web: "arrow_upward",
-                }}
-                size={18}
-              />
-              <ThemedText type="smallBold">Skip</ThemedText>
             </ThemedView>
           </Pressable>
 
@@ -757,12 +746,36 @@ export default function HomeScreen() {
                 name={{ ios: "checkmark", android: "check", web: "check" }}
                 size={18}
               />
-              <ThemedText type="smallBold">Keep</ThemedText>
+              <ThemedText type="smallBold">{t("home.keep")}</ThemedText>
               {pendingKeep.length > 0 && (
                 <ThemedText type="small" themeColor="textSecondary">
                   +{pendingKeep.length}
                 </ThemedText>
               )}
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
+
+        <ThemedView style={styles.skipRow}>
+          <Pressable
+            onPress={handleSkip}
+            disabled={!canSwipe}
+            style={({ pressed }) => (pressed || !canSwipe) && styles.pressed}
+          >
+            <ThemedView
+              type="backgroundSelected"
+              style={[styles.decisionButton, styles.skipButtonInline]}
+            >
+              <SymbolView
+                tintColor={theme.text}
+                name={{
+                  ios: "arrow.up",
+                  android: "arrow_upward",
+                  web: "arrow_upward",
+                }}
+                size={18}
+              />
+              <ThemedText type="smallBold">{t("home.skip")}</ThemedText>
             </ThemedView>
           </Pressable>
         </ThemedView>
@@ -787,7 +800,7 @@ export default function HomeScreen() {
                 }}
                 size={18}
               />
-              <ThemedText type="smallBold">Undo</ThemedText>
+              <ThemedText type="smallBold">{t("home.undo")}</ThemedText>
             </ThemedView>
           </Pressable>
 
@@ -802,7 +815,9 @@ export default function HomeScreen() {
           >
             <ThemedView type="backgroundSelected" style={styles.decisionButton}>
               <ThemedText type="smallBold">
-                {applying ? "Applying…" : `Apply ${decisions.length}`}
+                {applying
+                  ? t("home.applying")
+                  : t("home.apply", { n: decisions.length })}
               </ThemedText>
             </ThemedView>
           </Pressable>
@@ -860,6 +875,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.three,
     alignSelf: "stretch",
+  },
+  // Skip sits on its own line, centered — it shrinks to its content rather
+  // than filling the width like the paired Throw/Keep buttons.
+  skipRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignSelf: "stretch",
+  },
+  // Extra horizontal padding so the content-sized Skip button isn't cramped.
+  skipButtonInline: {
+    paddingHorizontal: Spacing.five,
   },
   pendingRow: {
     flexDirection: "row",

@@ -3,6 +3,10 @@ import { createContext, use, useEffect, useState, type ReactNode } from "react";
 
 export type ThemePreference = "light" | "dark" | "system";
 
+// The two languages the UI ships copy for. Stored explicitly rather than
+// following the OS locale — the user picks it in Settings.
+export type Language = "en" | "de";
+
 // App-wide user settings. Everything here survives a restart — see the
 // storage note below for what that means for the decisions buffer.
 export type UserSettings = {
@@ -19,6 +23,8 @@ export type UserSettings = {
   // True once the first-run About screen has auto-opened; keeps it from
   // reappearing on later launches.
   hasSeenInfo: boolean;
+  // UI language. Defaults to English; changed only from Settings.
+  language: Language;
 };
 
 // Falls back to the compiled-in constants, so a fresh install behaves exactly
@@ -29,6 +35,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   dailyReminderEnabled: false,
   dailyReminderTime: "20:00",
   hasSeenInfo: false,
+  language: "en",
 };
 
 // One key holding the whole object rather than a key per setting: a single
@@ -43,7 +50,6 @@ type UserContextValue = {
     key: K,
     value: UserSettings[K],
   ) => Promise<void>;
-  resetSettings: () => Promise<void>;
   // False until the stored settings have been read. Consumers that would
   // otherwise flash the defaults should wait for this.
   loaded: boolean;
@@ -102,12 +108,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     await persist(next);
   }
 
-  async function resetSettings() {
-    setSettings(DEFAULT_SETTINGS);
-    await persist(DEFAULT_SETTINGS);
-  }
-
-  const value = { settings, setSetting, resetSettings, loaded };
+  const value = { settings, setSetting, loaded };
 
   return <UserContext value={value}>{children}</UserContext>;
 }

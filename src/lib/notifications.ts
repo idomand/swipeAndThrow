@@ -1,3 +1,5 @@
+import type { Language } from "@/contexts/userContext";
+import { translate } from "@/i18n/translations";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
@@ -23,8 +25,10 @@ function parseTime(time: string): { hour: number; minute: number } {
 }
 
 // Sets the foreground presentation behaviour and creates the Android channel.
-// Safe to call more than once; call once at startup before scheduling.
-export async function configureNotifications() {
+// Safe to call more than once; call once at startup before scheduling. The
+// channel name is shown in Android's system settings, so it's localized to the
+// current language.
+export async function configureNotifications(language: Language) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldPlaySound: false,
@@ -36,7 +40,7 @@ export async function configureNotifications() {
 
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-      name: "Daily reminder",
+      name: translate(language, "notif.channel"),
       importance: Notifications.AndroidImportance.HIGH,
     });
   }
@@ -54,8 +58,10 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 }
 
 // (Re)schedules the single daily reminder at the given "HH:mm" time. Cancels any
-// existing one first so the identifier always maps to one live notification.
-export async function scheduleDailyReminder(time: string) {
+// existing one first so the identifier always maps to one live notification. The
+// notification text is baked in now, at the current language — callers reschedule
+// when the language changes so a fired reminder matches the app.
+export async function scheduleDailyReminder(time: string, language: Language) {
   await cancelDailyReminder();
 
   const { hour, minute } = parseTime(time);
@@ -63,8 +69,8 @@ export async function scheduleDailyReminder(time: string) {
   await Notifications.scheduleNotificationAsync({
     identifier: REMINDER_ID,
     content: {
-      title: "Time to tidy your photos",
-      body: "A quick swipe session keeps your gallery clean.",
+      title: translate(language, "notif.title"),
+      body: translate(language, "notif.body"),
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,
