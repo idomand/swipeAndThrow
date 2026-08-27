@@ -1,6 +1,6 @@
 import type { Language } from "@/contexts/userContext";
-import en from "./locales/en.json";
-import de from "./locales/de.json";
+import de from "./de.json";
+import en from "./en.json";
 
 // Every user-facing string in the app lives in the per-language JSON files under
 // `locales/`, keyed by a flat dot-namespaced id. The tables are kept in plain
