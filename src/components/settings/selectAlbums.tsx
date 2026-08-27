@@ -3,7 +3,7 @@ import { ThemedView } from "@/components/common/themedView";
 import { Spacing } from "@/constants/theme";
 import { useUserContext } from "@/contexts/userContext";
 import { useTheme } from "@/hooks/useTheme";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import {
   Album,
   AssetField,
@@ -104,7 +104,9 @@ export function SelectAlbums() {
   return (
     <SettingRow label={t("albums.label")} hint={t("albums.hint")}>
       <SettingsButton
-        label={count === 0 ? t("albums.all") : t("albums.selected", { n: count })}
+        label={
+          count === 0 ? t("albums.all") : t("albums.selected", { n: count })
+        }
         onPress={openModal}
       />
 

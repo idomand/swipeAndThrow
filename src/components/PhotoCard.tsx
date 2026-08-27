@@ -1,7 +1,7 @@
 import { ThemedText } from "@/components/common/themedText";
 import { Spacing } from "@/constants/theme";
 import { formatPhotoDate } from "@/helpers/formatPhotoDate";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import { Animated, Pressable, StyleSheet } from "react-native";

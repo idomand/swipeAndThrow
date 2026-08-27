@@ -13,7 +13,7 @@ import {
   type ThemePreference,
 } from "@/contexts/userContext";
 import { useTheme } from "@/hooks/useTheme";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import {
   cancelDailyReminder,
   ensureNotificationPermission,

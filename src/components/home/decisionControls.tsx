@@ -1,9 +1,9 @@
-import { DecisionButton } from "@/components/home/decisionButton";
 import { ThemedText } from "@/components/common/themedText";
 import { ThemedView } from "@/components/common/themedView";
+import { DecisionButton } from "@/components/home/decisionButton";
 import { Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/useTheme";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import { StyleSheet } from "react-native";
 
 // Everything below the deck: the "photos remaining" counter, the paired
@@ -89,14 +89,22 @@ export function DecisionControls({
       <ThemedView style={styles.pendingRow}>
         <DecisionButton
           label={t("home.undo")}
-          iconName={{ ios: "arrow.uturn.backward", android: "undo", web: "undo" }}
+          iconName={{
+            ios: "arrow.uturn.backward",
+            android: "undo",
+            web: "undo",
+          }}
           iconTint={theme.text}
           disabled={!canUndo}
           dimWhenDisabled
           onPress={onUndo}
         />
         <DecisionButton
-          label={applying ? t("home.applying") : t("home.apply", { n: decisionCount })}
+          label={
+            applying
+              ? t("home.applying")
+              : t("home.apply", { n: decisionCount })
+          }
           variant="selected"
           disabled={!hasDecisions || applying}
           dimWhenDisabled

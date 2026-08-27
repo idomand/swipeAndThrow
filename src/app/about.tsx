@@ -4,7 +4,7 @@ import { ThemedView } from "@/components/common/themedView";
 import { SettingsButton } from "@/components/settings/settingsButton";
 import { Spacing } from "@/constants/theme";
 import { KEEP_ALBUM_TITLE } from "@/constants/values";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import { router } from "expo-router";
 import { Linking, ScrollView, StyleSheet } from "react-native";
 

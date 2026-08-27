@@ -1,8 +1,8 @@
-import { PHOTO_BATCH_SIZE, KEEP_ALBUM_TITLE } from "@/constants/values";
+import { KEEP_ALBUM_TITLE, PHOTO_BATCH_SIZE } from "@/constants/values";
 import { type UserSettings } from "@/contexts/userContext";
 import { getAlbumName } from "@/helpers/getAlbumName";
 import { sample } from "@/helpers/sample";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import { type Decision } from "@/lib/decisionBuffer";
 import {
   Album,

@@ -3,7 +3,7 @@ import { Colors } from "@/constants/theme";
 import { UserProvider } from "@/contexts/userContext";
 import { useDailyReminder } from "@/hooks/useDailyReminder";
 import { useResolvedScheme } from "@/hooks/useTheme";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation } from "@/i18n/useTranslation";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
