@@ -1,0 +1,33 @@
+# Custom i18n Ally framework for SwipeAndThrow.
+#
+# This app has no off-the-shelf i18n library — it uses a hand-rolled
+# `useTranslation()` hook exposing `t(key)` / `tp(baseKey, count)` (see
+# src/hooks/useTranslation.ts and src/i18n/translations.ts). Without a known
+# library in package.json, i18n Ally's auto-detection can't recognize the setup
+# and won't activate. This file declares the framework explicitly so the
+# extension turns on and resolves keys against src/i18n/locales/*.json.
+#
+# Docs: https://github.com/lokalise/i18n-ally/wiki/Custom-Framework
+
+# The file types i18n Ally scans for t()/tp() calls.
+languageIds:
+  - javascript
+  - typescript
+  - javascriptreact
+  - typescriptreact
+
+# How key usages are found in code. The translation key must be captured in the
+# FIRST regex group ({key} is expanded by i18n Ally into a key-matching pattern).
+# Matches t("home.keep") and tp("albums.photoCount", n) — the (?:p)? makes the
+# "p" optional so both helpers are covered. The leading [^\w>] avoids matching
+# the "t" inside words like "format(".
+usageMatchRegex:
+  - "[^\\w>]t(?:p)?\\(\\s*['\"`]({key})['\"`]"
+
+# Insert a t("") call when using the "extract text" refactor.
+refactorTemplates:
+  - t("$1")
+
+# monopoly: this is the ONLY framework in play — skip auto-detection entirely, so
+# the extension activates purely from this file rather than from package.json.
+monopoly: true
