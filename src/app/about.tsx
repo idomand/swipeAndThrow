@@ -41,6 +41,13 @@ export default function About() {
 
         <ThemedView style={styles.section}>
           <ThemedText type="default" style={styles.heading}>
+            {t("about.infoHeading")}
+          </ThemedText>
+          <ThemedText type="default">{t("about.infoBody")}</ThemedText>
+        </ThemedView>
+
+        <ThemedView style={styles.section}>
+          <ThemedText type="default" style={styles.heading}>
             {t("about.permHeading")}
           </ThemedText>
           <ThemedText type="default">{t("about.permBody")}</ThemedText>

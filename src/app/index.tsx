@@ -6,9 +6,11 @@ import SwipeLabel from "@/components/SwipeLabel";
 import { Spacing } from "@/constants/theme";
 import { KEEP_ALBUM_TITLE, PHOTO_BATCH_SIZE } from "@/constants/values";
 import { useUserContext, type UserSettings } from "@/contexts/userContext";
+import { getAlbumName } from "@/helpers/getAlbumName";
 import { getErrorMessage } from "@/helpers/getErrorMessage";
 import { sample } from "@/helpers/sample";
 import { useTheme } from "@/hooks/useTheme";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   applyDecision,
   applySkip,
@@ -21,7 +23,6 @@ import {
   type BufferState,
 } from "@/lib/decisionBuffer";
 import { groupByFolder, type KeepGroup } from "@/lib/groupKeeps";
-import { useTranslation } from "@/hooks/useTranslation";
 import {
   Album,
   Asset,
@@ -38,13 +39,27 @@ import { Swiper, type SwiperCardRefType } from "rn-swiper-list";
 
 // A photo in the deck, with its uri resolved up front so the whole card stack
 // can render at once — the swiper needs every card ready, not one at a time.
-type PhotoCardData = { asset: Asset; uri: string };
+// The extra fields feed the tap-to-reveal info overlay; `album` is derived from
+// the source folder path (there's no album id on an asset).
+type PhotoCardData = {
+  asset: Asset;
+  uri: string;
+  album: string;
+  creationTime: number | null;
+  isFavorite: boolean;
+};
 
 // The plain, serializable shape handed to the swiper. `Asset` is a
 // native-backed class the swiper's worklets can't copy to the UI thread
 // ("Cannot copy value of type Asset"), so the asset itself never goes in —
 // the swipe callbacks look it up by deck position through `cardsRef` instead.
-type DeckItem = { id: string; uri: string };
+type DeckItem = {
+  id: string;
+  uri: string;
+  album: string;
+  creationTime: number | null;
+  isFavorite: boolean;
+};
 
 // The settings that shape a batch, folded into one comparable string. Only
 // these change what the gallery query returns, so the deck is reloaded on
@@ -148,7 +163,14 @@ export default function HomeScreen() {
   // What the swiper actually renders: the same order as `cards`, but stripped
   // to serializable fields so nothing native crosses into a worklet.
   const deckData = useMemo<DeckItem[]>(
-    () => cards.map((card) => ({ id: card.asset.id, uri: card.uri })),
+    () =>
+      cards.map((card) => ({
+        id: card.asset.id,
+        uri: card.uri,
+        album: card.album,
+        creationTime: card.creationTime,
+        isFavorite: card.isFavorite,
+      })),
     [cards],
   );
 
@@ -265,8 +287,7 @@ export default function HomeScreen() {
     // Drop anything already handled, so the random pick is over fresh photos.
     // The candidate ids are already deduped by `loadCandidatePool`.
     const pool = candidateIds.filter(
-      (id) =>
-        !reviewedIds.has(id) && !decidedIds.has(id) && !skipped.has(id),
+      (id) => !reviewedIds.has(id) && !decidedIds.has(id) && !skipped.has(id),
     );
 
     return sample(pool, PHOTO_BATCH_SIZE).map((id) => new Asset(id));
@@ -288,10 +309,16 @@ export default function HomeScreen() {
       const resolved = await Promise.all(
         batch.map(async (asset) => {
           try {
-            // Only the uri is needed to display the card; `getUri` resolves
-            // just that, without the full `getInfo` (dimensions, filename, …).
-            const uri = await asset.getUri();
-            return { asset, uri } as PhotoCardData;
+            // One call gets the uri, creation time, and favorite flag together;
+            // the album name is derived from the uri's source folder.
+            const info = await asset.getInfo();
+            return {
+              asset,
+              uri: info.uri,
+              album: getAlbumName(info.uri),
+              creationTime: info.creationTime ?? null,
+              isFavorite: info.isFavorite,
+            } as PhotoCardData;
           } catch {
             return null;
           }
@@ -413,7 +440,14 @@ export default function HomeScreen() {
   const renderCard = useCallback(
     (item: DeckItem, index: number) => {
       const near = index >= activeCardIndex - 1 && index <= activeCardIndex + 3;
-      return <PhotoCard uri={near ? item.uri : null} />;
+      return (
+        <PhotoCard
+          uri={near ? item.uri : null}
+          album={item.album}
+          creationTime={item.creationTime}
+          isFavorite={item.isFavorite}
+        />
+      );
     },
     [activeCardIndex],
   );
@@ -552,7 +586,9 @@ export default function HomeScreen() {
         if (kept > 0) await verifyKeepAlbum();
       } catch (error) {
         console.log("keep phase failed", error);
-        failures.push(t("apply.keepPhaseFail", { error: getErrorMessage(error) }));
+        failures.push(
+          t("apply.keepPhaseFail", { error: getErrorMessage(error) }),
+        );
       }
     }
 
