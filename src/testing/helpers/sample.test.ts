@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sample } from "./sample";
+import { sample } from "@/helpers/sample";
 
 describe("sample", () => {
   afterEach(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPhotoDate } from "./formatPhotoDate";
+import { formatPhotoDate } from "@/helpers/formatPhotoDate";
 
 // A fixed timestamp so the test doesn't depend on the current date.
 // 2023-06-15T12:00:00Z.

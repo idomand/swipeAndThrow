@@ -9,7 +9,7 @@ import {
   selectPendingDelete,
   selectPendingKeep,
   type BufferState,
-} from "./decisionBuffer";
+} from "@/lib/decisionBuffer";
 
 // Stand-in for expo-media-library's Asset — the buffer only touches `id`.
 type TestAsset = { id: string };

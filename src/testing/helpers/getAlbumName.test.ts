@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAlbumName } from "./getAlbumName";
+import { getAlbumName } from "@/helpers/getAlbumName";
 
 describe("getAlbumName", () => {
   it("returns the Camera folder name", () => {

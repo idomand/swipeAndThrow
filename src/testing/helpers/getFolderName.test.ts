@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getFolderName } from "./getFolderName";
+import { getFolderName } from "@/helpers/getFolderName";
 
 describe("getFolderName", () => {
   it("strips the filename and the file:// scheme", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { translate, translatePlural } from "./translations";
+import { translate, translatePlural } from "@/i18n/translations";
 
 // `translations.ts` only imports the `Language` type from userContext (erased at
 // runtime), so it's safe to test under the plain node environment — nothing

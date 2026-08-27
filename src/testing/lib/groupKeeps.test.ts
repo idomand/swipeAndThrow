@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupByFolder } from "./groupKeeps";
+import { groupByFolder } from "@/lib/groupKeeps";
 
 type TestAsset = { id: string };
 const asset = (id: string): TestAsset => ({ id });
